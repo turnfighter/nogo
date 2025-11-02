@@ -132,13 +132,8 @@
 
   <script>
     (function () {
-      // Wait until Leaflet, LRM, and your global `map` exist
       const ready = () => window.map && window.L && L.Routing;
-      const wait = setInterval(() => {
-        if (!ready()) return;
-        clearInterval(wait);
-        boot();
-      }, 50);
+      const wait = setInterval(() => { if (!ready()) return; clearInterval(wait); boot(); }, 50);
 
       function boot() {
         // ---- Config ----
@@ -153,6 +148,10 @@
         const tagEl = document.getElementById('hsnTagline');
         const btnNew = document.getElementById('hsnNew');
         const btnGo = document.getElementById('hsnRoute');
+
+        // speed up rendering
+        imgEl.loading = 'lazy';
+        imgEl.decoding = 'async';
 
         // ---- Helpers ----
         const firstNames = ['Avery', 'Jordan', 'Riley', 'Taylor', 'Morgan', 'Elliot', 'Rowan', 'Charlie', 'Reese', 'Skyler', 'Alex', 'Quinn', 'Peyton', 'Dakota', 'Casey', 'Remy', 'Jamie', 'Harper', 'Sage', 'Kai'];
@@ -172,17 +171,42 @@
         const rAge = () => Math.floor(18 + Math.random() * 21);
         const seed = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
 
-        // use weserv proxy to avoid CORS/referrer blocks
-        const faceURL = () => `https://images.weserv.nl/?url=thispersondoesnotexist.com/image&n=-1&il&af&${seed()}`;
-
-        function randomNearbyLatLng(origin, minM, maxM) {
-          const R = 6371000, d = minM + Math.random() * (maxM - minM), b = Math.random() * 2 * Math.PI;
-          const lat1 = origin.lat * Math.PI / 180, lon1 = origin.lng * Math.PI / 180;
-          const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) + Math.cos(lat1) * Math.sin(d / R) * Math.cos(b));
-          const lon2 = lon1 + Math.atan2(Math.sin(b) * Math.sin(d / R) * Math.cos(lat1), Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
-          return L.latLng(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI);
+        // ---- Face pipeline (humans only) ----
+        async function preload(url) {
+          return new Promise((res, rej) => {
+            const img = new Image();
+            img.referrerPolicy = 'no-referrer';
+            img.onload = () => res(url);
+            img.onerror = rej;
+            img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now(); // cache-bust
+          });
         }
-        const kmDistance = (a, b) => a && b ? (map.distance(a, b) / 1000) : null;
+
+        async function getPortraitURL() {
+          // 1) randomuser: guaranteed human portraits
+          try {
+            const r = await fetch('https://randomuser.me/api/?inc=picture&noinfo', { cache: 'no-store' });
+            const j = await r.json();
+            const url = j?.results?.[0]?.picture?.large || j?.results?.[0]?.picture?.medium;
+            if (url) {
+              await preload(url);
+              return url;
+            }
+          } catch (e) { /* continue to fallback */ }
+
+          // 2) pravatar: curated human faces (1..70)
+          try {
+            const n = 1 + Math.floor(Math.random() * 70);
+            const url = `https://i.pravatar.cc/512?img=${n}`;
+            await preload(url);
+            return url;
+          } catch (e) { /* continue */ }
+
+          // 3) last resort: thispersondoesnotexist via weserv (some setups block direct calls)
+          const url = `https://images.weserv.nl/?url=thispersondoesnotexist.com/image&n=-1&il&af&${seed()}`;
+          await preload(url).catch(() => { });
+          return url;
+        }
 
         // ---- Map / Router ----
         let userLatLng = null;
@@ -204,7 +228,28 @@
             .on('locationerror', () => userLatLng = map.getCenter());
         } else userLatLng = map.getCenter();
 
+        const kmDistance = (a, b) => a && b ? (map.distance(a, b) / 1000) : null;
+        function randomNearbyLatLng(origin, minM, maxM) {
+          const R = 6371000, d = minM + Math.random() * (maxM - minM), b = Math.random() * 2 * Math.PI;
+          const lat1 = origin.lat * Math.PI / 180, lon1 = origin.lng * Math.PI / 180;
+          const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) + Math.cos(lat1) * Math.sin(d / R) * Math.cos(b));
+          const lon2 = lon1 + Math.atan2(Math.sin(b) * Math.sin(d / R) * Math.cos(lat1), Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
+          return L.latLng(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI);
+        }
+
         // ---- Card logic ----
+        async function setPortrait() {
+          tagEl.textContent = 'Choosing your most photogenic match…';
+          try {
+            const url = await getPortraitURL();
+            imgEl.src = url;
+            tagEl.textContent = rp(taglines);
+          } catch {
+            imgEl.src = `https://i.pravatar.cc/512?u=${seed()}`;
+            tagEl.textContent = rp(taglines);
+          }
+        }
+
         function generateMatch() {
           const origin = userLatLng || map.getCenter();
           const tempDest = randomNearbyLatLng(origin, ROUTE_RADIUS_MIN_M, ROUTE_RADIUS_MAX_M);
@@ -216,14 +261,13 @@
           const k = kmDistance(origin, tempDest);
           distEl.textContent = (k != null) ? `${k.toFixed(1)} km away` : 'nearby';
 
-          imgEl.src = faceURL();
-          imgEl.onerror = () => { imgEl.src = `https://picsum.photos/seed/${seed()}/600/400`; };
+          // async portrait (doesn’t block UI)
+          setPortrait();
         }
 
         async function routeRandom() {
           const origin = userLatLng || map.getCenter();
           try { ensureRouter(); } catch { tagEl.textContent = 'Routing unavailable.'; return; }
-
           tagEl.textContent = 'Plotting a date spot nearby…';
 
           let tries = 0, dest = null, ok = false, lastErr = null;
@@ -251,12 +295,13 @@
         }
 
         // Events + init
-        btnNew.addEventListener('click', generateMatch);
-        btnGo.addEventListener('click', routeRandom);
+        document.getElementById('hsnNew').addEventListener('click', generateMatch);
+        document.getElementById('hsnRoute').addEventListener('click', routeRandom);
         generateMatch();
       }
     })();
   </script>
+
   <style>
     /* Context menu */
     .ctxmenu {
