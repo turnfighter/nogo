@@ -401,6 +401,56 @@
       align-items: center;
     }
 
+    .scenic-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, .15);
+      border-radius: 10px;
+    }
+
+    .scenic-toggle input {
+      display: none;
+    }
+
+    .scenic-toggle .knob {
+      width: 42px;
+      height: 24px;
+      background: #eee;
+      border-radius: 999px;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+    }
+
+    .scenic-toggle .knob::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+      transition: all .18s ease;
+    }
+
+    .scenic-toggle input:checked+.knob {
+      background: #d9f0ff;
+    }
+
+    .scenic-toggle input:checked+.knob::after {
+      transform: translateX(18px);
+      background: #1a73e8;
+    }
+
+    .scenic-toggle .txt {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
     .searchwrap {
       position: relative;
     }
@@ -577,6 +627,13 @@
       <input id="destination" placeholder="Search for a place..." autocomplete="off" />
       <div id="results"></div>
     </div>
+    <!-- Scenic toggle -->
+    <label class="scenic-toggle" title="Take the long way">
+      <input type="checkbox" id="scenicToggle" />
+      <span class="knob"></span>
+      <span class="txt">Scenic route 🗺️</span>
+    </label>
+
 
 
     <!-- Transport modes -->
@@ -1080,9 +1137,22 @@
     document.getElementById('go').addEventListener('click', async () => {
       const text = destinationEl.value.trim();
       if (!text) return alert("Type a destination first!");
-
+      // 🔥 Remove old routes and markers
+      if (routing) { map.removeControl(routing); routing = null; }
+      if (animatedLine) { map.removeLayer(animatedLine); animatedLine = null; }
+      if (animatedShadow) { map.removeLayer(animatedShadow); animatedShadow = null; }
+      map.eachLayer(layer => {
+        if (layer instanceof L.Marker && layer !== liveDot && layer !== userMarker)
+          map.removeLayer(layer);
+      });
       const mode = getSelectedMode();
 
+      if (isScenic()) {
+        runScenic(mode).catch(() => showToast('Scenic misadventure failed — try again 😅'));
+        return; // don't do normal routing
+      }
+
+      // (keep your existing normal fake-target routing below)
       if (chosenPlace) {
         const d = fmtDist(haversine(startLatLng, chosenPlace.coords));
         showToast(`${mode.toUpperCase()} to “${chosenPlace.name}” is ${d}. Calculating route...`);
@@ -1163,14 +1233,170 @@
 
       return animatedLine;
     }
+    function isScenic() {
+      const el = document.getElementById('scenicToggle');
+      return !!(el && el.checked);
+    }
 
   </script>
+  <script>
+    /* === Scenic helpers === */
+    function antipode(ll) {
+      // Opposite point on Earth
+      const lat = -ll.lat;
+      let lng = ll.lng + 180;
+      if (lng > 180) lng -= 360;
+      return L.latLng(lat, lng);
+    }
+
+    // Great-circle interpolation between two points (Vincenty-style unit vector slerp)
+    function gcSample(a, b, steps = 200) {
+      const φ1 = toRad(a.lat), λ1 = toRad(a.lng);
+      const φ2 = toRad(b.lat), λ2 = toRad(b.lng);
+
+      // convert to 3D unit vectors
+      const v1 = [
+        Math.cos(φ1) * Math.cos(λ1),
+        Math.cos(φ1) * Math.sin(λ1),
+        Math.sin(φ1)
+      ];
+      const v2 = [
+        Math.cos(φ2) * Math.cos(λ2),
+        Math.cos(φ2) * Math.sin(λ2),
+        Math.sin(φ2)
+      ];
+
+      // angle between
+      const dot = Math.max(-1, Math.min(1, v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]));
+      const Ω = Math.acos(dot);
+      if (Ω === 0) return [L.latLng(a.lat, a.lng), L.latLng(b.lat, b.lng)];
+
+      const sinΩ = Math.sin(Ω);
+      const pts = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const s1 = Math.sin((1 - t) * Ω) / sinΩ;
+        const s2 = Math.sin(t * Ω) / sinΩ;
+        const x = s1 * v1[0] + s2 * v2[0];
+        const y = s1 * v1[1] + s2 * v2[1];
+        const z = s1 * v1[2] + s2 * v2[2];
+        const φ = Math.atan2(z, Math.hypot(x, y));
+        const λ = Math.atan2(y, x);
+        pts.push(L.latLng(toDeg(φ), toDeg(λ)));
+      }
+      return pts;
+    }
+
+    // Sum length of a polyline in meters
+    function pathLengthMeters(coords) {
+      let sum = 0;
+      for (let i = 1; i < coords.length; i++) {
+        sum += haversine(coords[i - 1], coords[i]);
+      }
+      return sum;
+    }
+    // Put this near your helpers
+    const LAND_PIVOTS = [
+      { name: 'Iceland', lat: 64.9631, lng: -19.0208 },
+      { name: 'Reykjavík', lat: 64.1466, lng: -21.9426 },
+      { name: 'Sahara', lat: 23.4162, lng: 25.6628 },
+      { name: 'Cape Town', lat: -33.9249, lng: 18.4241 },
+      { name: 'Perth', lat: -31.9505, lng: 115.8605 },
+      { name: 'Ushuaia', lat: -54.8019, lng: -68.3030 },
+      { name: 'Honolulu', lat: 21.3069, lng: -157.8583 },
+      { name: 'Santiago', lat: -33.4489, lng: -70.6693 },
+      { name: 'Tokyo', lat: 35.6762, lng: 139.6503 },
+      { name: 'Madagascar', lat: -18.7669, lng: 46.8691 },
+      { name: 'Patagonia', lat: -49.3315, lng: -72.8856 },
+      { name: 'Mongolia', lat: 46.8625, lng: 103.8467 }
+    ];
+
+    // pick a far-away land pivot (>= 8000 km), jittered so it's not identical every time
+    function pickScenicPivot(start) {
+      const FAR_KM = 8000;
+      const candidates = LAND_PIVOTS
+        .map(p => ({ p, d: haversine(start, p) / 1000 }))
+        .filter(x => x.d >= FAR_KM)
+        .sort((a, b) => b.d - a.d)
+        .slice(0, 6); // top few farthest options
+      let chosen;
+      if (candidates.length) {
+        chosen = candidates[Math.floor(Math.random() * candidates.length)].p;
+      } else {
+        // fallback: a randomized “quasi-antipode” that isn’t exactly ocean-locked
+        const anti = antipode(start);
+        const rot = (Math.random() * 120 - 60); // rotate ±60° in longitude
+        chosen = { lat: anti.lat, lng: anti.lng + rot };
+      }
+      // jitter ~±2–4° so you don’t hit the exact same spot
+      const jitterDeg = 2 + Math.random() * 2;
+      const sign = () => (Math.random() < 0.5 ? -1 : 1);
+      return L.latLng(
+        chosen.lat + sign() * jitterDeg,
+        chosen.lng + sign() * jitterDeg
+      );
+    }
+
+    async function runScenic(mode) {
+      if (!startLatLng) { showToast('Need your location first!'); return; }
+
+      // End near you (still “wrong”), to keep the joke
+      let end = null;
+      try {
+        end = chosenPlace ? chosenPlace.coords : await pickFakeRoutableTarget(startLatLng, mode, 5, 6);
+      } catch {
+        end = makeRandomNearbyTarget(startLatLng, 4);
+      }
+
+      // Make a far-away detour near your antipode, nudged randomly so it isn’t literally exact
+      const anti = antipode(startLatLng);
+      const detour = pickScenicPivot(startLatLng);
+
+      // Build great-circle legs with plenty of points for a smooth snake
+      const leg1 = gcSample(startLatLng, detour, 280);
+      const leg2 = gcSample(detour, end, 280);
+
+      // Optional: sprinkle a tiny local “arrival squiggle” so it feels map-like
+      const arrival = [end];
+      for (let i = 0; i < 6; i++) {
+        const jitter = makeRandomNearbyTarget(end, 0.2); // ~200m wiggles
+        arrival.push(jitter);
+      }
+      arrival.push(end);
+
+      const coords = [...leg1, ...leg2, ...arrival];
+
+      // Animate
+      drawSnakingRoute(coords, {
+        color: '#1a73e8',
+        shadowColor: '#bcd9ff',
+        durationMs: 12000, // long, satisfying snake
+        fit: true
+      });
+
+      // Stats
+      const distM = pathLengthMeters(coords);
+      const emoji = { car: '🚗', walk: '🚶', bus: '🚌', train: '🚆' }[mode] || '🚗';
+
+      // Absurd ETAs (just for fun)
+      const avgKmH = (mode === 'walk') ? 5 : (mode === 'train') ? 80 : (mode === 'bus') ? 25 : 70;
+      const etaMin = (distM / 1000) / avgKmH * 60;
+
+      // Marker + popup
+      L.marker(end, { title: 'Totally sensible scenic finish' }).addTo(map)
+        .bindPopup(`Scenic route engaged 🗺️<br>${emoji} <b>${fmtDist(distM)}</b> • ~<b>${fmtMins(etaMin)}</b><br><i>Hope you packed snacks.</i>`)
+        .openPopup();
+
+      showToast('Taking the long way around the planet…');
+    }
+
+  </script>
+
   <!-- Right-click context menu -->
   <div id="ctxmenu" class="ctxmenu"></div>
 
   <!-- Measure HUD -->
   <div id="measureHUD" class="measure-hud">Distance: 0 m</div>
-
 </body>
 
 </html>
