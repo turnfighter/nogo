@@ -1,325 +1,297 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet, Platform, KeyboardAvoidingView } from "react-native";
-import MapView, { Marker, Polyline, Circle } from "react-native-maps";
+import { SafeAreaView, View, Text, TextInput, FlatList, Pressable, Image, StyleSheet, Platform, Keyboard, Dimensions } from "react-native";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
-/* ---- helpers (unchanged) ---- */
-const toRad = (d) => (d * Math.PI) / 180;
-const toDeg = (r) => (r * 180) / Math.PI;
-const haversine = (a, b) => {
-  const R = 6371e3;
-  const φ1 = toRad(a.latitude), λ1 = toRad(a.longitude);
-  const φ2 = toRad(b.latitude), λ2 = toRad(b.longitude);
-  const dφ = φ2 - φ1, dλ = λ2 - λ1;
-  const s = Math.sin(dφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-};
-const fmtDist = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 5000 ? 1 : 0)} km`);
-const fmtMins = (min) => (min < 60 ? `${Math.round(min)} min` : `${Math.floor(min / 60)} hr ${Math.round(min % 60) || ""}`.trim());
-const destPoint = (lat, lon, distanceMeters, bearingRad) => {
-  const R = 6371e3;
-  const φ1 = toRad(lat), λ1 = toRad(lon);
-  const δ = distanceMeters / R, θ = bearingRad;
-  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
-  const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
-  return { latitude: toDeg(φ2), longitude: ((toDeg(λ2) + 540) % 360) - 180 };
-};
-
-const funnyProfiles = [
-  { name: "Alex", quote: "Just moved to the neighborhood — come say hi 👋" },
-  { name: "Jordan", quote: "Looking for someone to explore nearby spots with 🗺️" },
-  { name: "Taylor", quote: "You’ll never guess where I am 😏" },
-  { name: "Sam", quote: "Says they know a shortcut... don’t trust them 😈" },
-  { name: "Riley", quote: "Apparently only 2 km away. Suspicious 🤔" },
+const firstNames = ['Avery', 'Jordan', 'Riley', 'Taylor', 'Morgan', 'Elliot', 'Rowan', 'Charlie', 'Reese', 'Skyler', 'Alex', 'Quinn', 'Peyton', 'Dakota', 'Casey', 'Remy', 'Jamie', 'Harper', 'Sage', 'Kai'];
+const lastNames = ['Hart', 'Rivera', 'Quinn', 'Stone', 'Bennett', 'Sutton', 'Hayes', 'Reid', 'Brooks', 'Cole', 'Ramos', 'Blake', 'Parker', 'Lane', 'Ellis', 'Greer', 'Monroe', 'Jensen', 'Shaw', 'Wells'];
+const taglines = [
+  '“Will swipe right for tacos 🌮.”', '“Left turns only, sorry.”', '“Scenic route > fastest route.”',
+  '“Professional third-wheeler.”', '“Here for wrong directions & right vibes.”',
+  '“Dog person. Also maps person.”', '“Let’s get lost (locally).”', '“5⭐ date, 2⭐ navigator.”'
 ];
+const rp = a => a[Math.floor(Math.random() * a.length)];
+const rName = () => `${rp(firstNames)} ${rp(lastNames)}`;
+const rAge = () => Math.floor(18 + Math.random() * 21);
 
-const modeEmoji = { car: "🚗", walk: "🚶", bus: "🚌", train: "🚆" };
-const osrmProfileFor = (mode) => (mode === "walk" ? "foot" : "driving");
+const ModePill = ({ label, emoji, active, onPress }) => (
+  <Pressable onPress={onPress} style={[styles.pill, active && styles.pillActive]} hitSlop={8}>
+    <Text style={styles.pillEmoji}>{emoji}</Text>
+    <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
+  </Pressable>
+);
 
-/* ---- API calls ---- */
-async function photonSearch(q, bias) {
-  if (!q) return [];
-  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lat=${bias.latitude}&lon=${bias.longitude}&lang=en`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return (data.features || []).map((f) => {
-    const p = f.properties || {};
-    const name = [p.name, p.street, p.housenumber, p.city || p.town || p.village, p.state, p.country].filter(Boolean);
-    const title = [...new Set(name)].join(", ") || p.type || "Unnamed place";
-    return { title, coords: { latitude: f.geometry.coordinates[1], longitude: f.geometry.coordinates[0] }, type: p.type || "POI" };
-  });
-}
-async function osrmNearest(latlng, mode) {
-  const prof = osrmProfileFor(mode);
-  const url = `https://router.project-osrm.org/nearest/v1/${prof}/${latlng.longitude},${latlng.latitude}?number=1`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("nearest failed");
-  const data = await res.json();
-  const wp = data?.waypoints?.[0];
-  if (!wp?.location) throw new Error("no waypoint");
-  const [lng, lat] = wp.location;
-  return { latitude: lat, longitude: lng };
-}
-async function osrmRoute(start, end, mode) {
-  const prof = osrmProfileFor(mode);
-  const url = `https://router.project-osrm.org/route/v1/${prof}/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("route failed");
-  const data = await res.json();
-  const r = data?.routes?.[0];
-  if (!r) throw new Error("no route");
-  const coords = r.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-  return { coords, distance: r.distance, duration: r.duration };
-}
-
-/* ---- Inner app uses safe-area ---- */
-function InnerApp() {
-  const insets = useSafeAreaInsets();
+export default function App() {
+  // --- Map & location ---
+  const [region, setRegion] = useState(null);
   const mapRef = useRef(null);
 
-  const [region, setRegion] = useState({ latitude: 43.6532, longitude: -79.3832, latitudeDelta: 0.2, longitudeDelta: 0.2 });
-  const [me, setMe] = useState(null);
-  const [accuracy, setAccuracy] = useState(30);
-
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [showResults, setShowResults] = useState(false);
-  const [mode, setMode] = useState("car");
-
-  const [target, setTarget] = useState(null);
-  const [route, setRoute] = useState(null);
-  const [showCard, setShowCard] = useState(false);
-  const randomProfile = useMemo(() => funnyProfiles[Math.floor(Math.random() * funnyProfiles.length)], [showCard]);
-
-  /* location */
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const here = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-      setMe(here);
-      setAccuracy(pos.coords.accuracy || 30);
-      setRegion((r) => ({ ...r, ...here, latitudeDelta: 0.08, longitudeDelta: 0.08 }));
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        // Fallback to Toronto
+        setRegion({ latitude: 43.6532, longitude: -79.3832, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setRegion({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        latitudeDelta: 0.03,
+        longitudeDelta: 0.03,
+      });
       Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 2000, distanceInterval: 2 },
-        (p) => {
-          setMe({ latitude: p.coords.latitude, longitude: p.coords.longitude });
-          setAccuracy(p.coords.accuracy || 30);
-        }
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
+        (pos) => setRegion(r => ({ ...r, latitude: pos.coords.latitude, longitude: pos.coords.longitude }))
       );
     })();
   }, []);
 
-  /* search */
+  // --- Search / autocomplete (Photon/OSM) ---
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [showResults, setShowResults] = useState(false);
+
   useEffect(() => {
-    let active = true;
     const t = setTimeout(async () => {
-      if (!query.trim()) { setResults([]); return; }
+      if (!query.trim()) { setResults([]); setShowResults(false); return; }
       try {
-        const bias = me || { latitude: region.latitude, longitude: region.longitude };
-        const feats = await photonSearch(query.trim(), bias);
-        if (!active) return;
-        feats.sort((a, b) => haversine(bias, a.coords) - haversine(bias, b.coords) < 0 ? -1 : 1);
-        setResults(feats);
+        const lat = region?.latitude ?? 43.6532;
+        const lon = region?.longitude ?? -79.3832;
+        const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lat=${lat}&lon=${lon}&lang=en`;
+        const r = await fetch(url);
+        const j = await r.json();
+        const items = (j.features || []).map(f => {
+          const p = f.properties || {};
+          const nameParts = [p.name, p.street, p.housenumber, p.city || p.town || p.village, p.state, p.country].filter(Boolean);
+          const name = [...new Set(nameParts)].join(", ") || p.osm_value || "Unnamed place";
+          const [x, y] = f.geometry.coordinates;
+          return { id: `${x},${y}`, name, type: p.type || "POI", lat: y, lon: x };
+        });
+        setResults(items);
         setShowResults(true);
-      } catch { }
+      } catch {
+        setResults([]); setShowResults(false);
+      }
     }, 250);
-    return () => { active = false; clearTimeout(t); };
-  }, [query, me, region.latitude, region.longitude]);
+    return () => clearTimeout(t);
+  }, [query, region]);
 
-  const pickFakeRoutableTarget = async (center, tries = 6) => {
-    for (let i = 0; i < tries; i++) {
-      const distKm = (5 * (0.3 + 0.7 * Math.random()));
-      const bearing = Math.random() * 2 * Math.PI;
-      const c = destPoint(center.latitude, center.longitude, distKm * 1000, bearing);
-      try {
-        const snapped = await osrmNearest(c, mode);
-        if (haversine(center, snapped) > 200) return snapped;
-      } catch { }
-    }
-    throw new Error("no routable target");
-  };
-
-  const estimateTransitMinutes = (distanceMeters, m) => {
-    const dKm = distanceMeters / 1000;
-    const speeds = { bus: 22, train: 80 };
-    const wait = { bus: 3 + Math.random() * 7, train: 5 + Math.random() * 15 };
-    const move = (dKm / speeds[m]) * 60;
-    return move + wait[m];
-  };
-
-  const routeToFake = async () => {
-    const start = me || { latitude: region.latitude, longitude: region.longitude };
-    try {
-      const fake = await pickFakeRoutableTarget(start, 6);
-      const r = await osrmRoute(start, fake, mode);
-      const mins = (mode === "bus" || mode === "train") ? estimateTransitMinutes(r.distance, mode) : r.duration / 60;
-      setTarget(fake);
-      setRoute({ coords: r.coords, distance: r.distance, minutes: mins });
-      mapRef.current?.fitToCoordinates(r.coords, { edgePadding: { top: 100, bottom: 120, left: 60, right: 60 }, animated: true });
-    } catch {
-      alert("Couldn’t find a nearby road for the fake target. Try again.");
-    }
-  };
-
-  const selectResult = (item) => {
-    setQuery(item.title);
+  const onPickResult = (item) => {
+    setQuery(item.name);
     setShowResults(false);
-    setShowCard(true);
-    mapRef.current?.animateToRegion({ ...item.coords, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 300);
+    Keyboard.dismiss();
+    // Pan map to selection
+    mapRef.current?.animateToRegion({ latitude: item.lat, longitude: item.lon, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 400);
   };
+
+  // --- Modes ---
+  const [mode, setMode] = useState("car"); // car | walk | bus | train
+
+  // --- Hot Singles card ---
+  const [profile, setProfile] = useState({ name: rName(), age: rAge(), distanceKm: "–", tagline: "Refreshing your fated match…", photo: null });
+
+  const loadPortrait = async () => {
+    try {
+      const r = await fetch("https://randomuser.me/api/?inc=picture&noinfo", { cache: "no-store" });
+      const j = await r.json();
+      const url = j?.results?.[0]?.picture?.large || j?.results?.[0]?.picture?.medium;
+      if (url) {
+        setProfile(p => ({ ...p, photo: url, tagline: rp(taglines) }));
+        return;
+      }
+    } catch { }
+    // fallback
+    const id = Math.floor(1 + Math.random() * 70);
+    setProfile(p => ({ ...p, photo: `https://i.pravatar.cc/512?img=${id}`, tagline: rp(taglines) }));
+  };
+
+  const refreshMatch = () => {
+    const name = rName(); const age = rAge();
+    const distanceKm = region ? (Math.random() * 4 + 0.3).toFixed(1) : "–";
+    setProfile({ name, age, distanceKm, tagline: "Choosing your most photogenic match…", photo: null });
+    loadPortrait();
+  };
+
+  useEffect(() => { refreshMatch(); }, []);
+
+  const goRandom = () => {
+    // For now: just nudge camera a bit to simulate a “date spot lock”
+    if (!region) return;
+    const bearing = Math.random() * Math.PI * 2;
+    const dLat = 0.01 * Math.cos(bearing);
+    const dLon = 0.01 * Math.sin(bearing);
+    const dest = { latitude: region.latitude + dLat, longitude: region.longitude + dLon, latitudeDelta: 0.02, longitudeDelta: 0.02 };
+    mapRef.current?.animateToRegion(dest, 600);
+  };
+
+  const windowW = Dimensions.get("window").width;
+  const isSmall = windowW < 380;
 
   return (
-    <View style={{ flex: 1 }}>
-      <MapView
-        ref={mapRef}
-        style={{ flex: 1 }}
-        initialRegion={region}
-        onRegionChangeComplete={setRegion}
-      >
-        {me && (
-          <>
-            <Marker coordinate={me} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.blueDotOuter}><View style={styles.blueDotInner} /></View>
-            </Marker>
-            <Circle center={me} radius={Math.max(accuracy, 10)} strokeWidth={1} strokeColor="rgba(26,115,232,0.2)" fillColor="rgba(26,115,232,0.08)" />
-          </>
+    <SafeAreaView style={styles.root}>
+      <View style={styles.mapWrap}>
+        {region && (
+          <MapView
+            ref={mapRef}
+            style={StyleSheet.absoluteFill}
+            provider={PROVIDER_GOOGLE}
+            showsUserLocation
+            initialRegion={region}
+            onRegionChangeComplete={setRegion}
+          >
+            {/* Optional: drop a marker when user picks a result */}
+            {/* <Marker coordinate={{ latitude: ..., longitude: ... }} /> */}
+          </MapView>
         )}
-        {target && <Marker coordinate={target} pinColor="#ff4da6" />}
-        {route?.coords?.length ? (
-          <>
-            <Polyline coordinates={route.coords} strokeWidth={7} strokeColor="#ffd1e8" />
-            <Polyline coordinates={route.coords} strokeWidth={4} strokeColor="#ff4da6" />
-          </>
-        ) : null}
-      </MapView>
 
-      {/* Top controls inside safe-area + keyboard avoid */}
-      <KeyboardAvoidingView behavior={Platform.select({ ios: "padding", android: undefined })} style={[styles.controlsWrap, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.controls}>
-          <View style={styles.searchWrap}>
+        {/* Top controls */}
+        <View style={styles.controls} pointerEvents="box-none">
+          {/* Search */}
+          <View style={[styles.searchWrap, { width: isSmall ? 260 : 320 }]}>
             <TextInput
               value={query}
-              onChangeText={(t) => { setQuery(t); setShowResults(true); }}
+              onChangeText={setQuery}
               placeholder="Search for a place..."
-              style={styles.input}
-              returnKeyType="search"
-              autoCorrect={false}
+              placeholderTextColor="#7a7a7a"
+              style={styles.search}
+              onFocus={() => setShowResults(true)}
             />
             {showResults && !!results.length && (
-              <View style={styles.resultsBox}>
+              <View style={styles.results}>
                 <FlatList
                   keyboardShouldPersistTaps="handled"
                   data={results}
-                  keyExtractor={(_, i) => String(i)}
+                  keyExtractor={(it) => it.id}
                   renderItem={({ item }) => (
-                    <TouchableOpacity style={styles.resultRow} onPress={() => selectResult(item)}>
+                    <Pressable onPress={() => onPickResult(item)} style={styles.resultRow}>
                       <View style={styles.pin} />
                       <View style={{ flexShrink: 1 }}>
-                        <Text numberOfLines={1} style={styles.rMain}>{item.title}</Text>
-                        <Text numberOfLines={1} style={styles.rSub}>{item.type || "POI"}</Text>
+                        <Text numberOfLines={1} style={styles.rMain}>{item.name}</Text>
+                        <Text numberOfLines={1} style={styles.rSub}>{item.type}</Text>
                       </View>
-                      <Text style={styles.rDist}>{me ? fmtDist(haversine(me, item.coords)) : ""}</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   )}
                 />
               </View>
             )}
           </View>
 
-          <View style={styles.modes}>
-            {["car", "walk", "bus", "train"].map((m) => (
-              <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.mode, mode === m && styles.modeActive]}>
-                <Text style={{ fontSize: 16 }}>{modeEmoji[m]}</Text>
-                <Text style={styles.modeLabel}>{m[0].toUpperCase() + m.slice(1)}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Modes */}
+          <View style={styles.modeBar}>
+            <ModePill label="Car" emoji="🚗" active={mode === "car"} onPress={() => setMode("car")} />
+            <ModePill label="Walk" emoji="🚶" active={mode === "walk"} onPress={() => setMode("walk")} />
+            <ModePill label="Bus" emoji="🚌" active={mode === "bus"} onPress={() => setMode("bus")} />
+            <ModePill label="Train" emoji="🚆" active={mode === "train"} onPress={() => setMode("train")} />
           </View>
 
-          <TouchableOpacity style={styles.go} onPress={routeToFake}>
-            <Text style={{ color: "#fff", fontWeight: "700" }}>Go</Text>
-          </TouchableOpacity>
+          {/* Go button */}
+          <Pressable style={styles.goBtn} onPress={goRandom}>
+            <Text style={styles.goText}>Go</Text>
+          </Pressable>
         </View>
-      </KeyboardAvoidingView>
 
-      {/* Funny profile card (responsive width) */}
-      {showCard && (
-        <View style={[styles.card, { top: insets.top + 80, width: "84%", maxWidth: 360 }]}>
-          <Image source={{ uri: `https://source.unsplash.com/600x400/?portrait,person,smile&sig=${Math.random()}` }} style={{ width: "100%", height: 180 }} resizeMode="cover" />
-          <View style={{ padding: 12 }}>
-            <Text style={{ fontWeight: "700", fontSize: 16 }}>{randomProfile.name}, {Math.floor(Math.random() * 5) + 1} km away 😎</Text>
-            <Text style={{ color: "#555", marginTop: 4 }}>"{randomProfile.quote}"</Text>
+        {/* Hot Singles Card */}
+        <View style={styles.card} pointerEvents="box-none">
+          <View style={styles.cardInner}>
+            <Text style={styles.cardHeader}>🔥 Hot singles in your area</Text>
+            <Image source={profile.photo ? { uri: profile.photo } : null} style={styles.face} resizeMode="cover" />
+            <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
+              <View style={styles.row}>
+                <Text style={styles.name}>{profile.name}</Text>
+                <Text style={styles.pill}>{profile.age}</Text>
+                <Text style={styles.pill}>{profile.distanceKm} km away</Text>
+              </View>
+              <Text style={styles.sub} numberOfLines={2}>{profile.tagline}</Text>
+              <View style={styles.actions}>
+                <Pressable style={[styles.btn, styles.btnGhost]} onPress={refreshMatch}>
+                  <Text style={styles.btnGhostText}>New match</Text>
+                </Pressable>
+                <Pressable style={[styles.btn, styles.btnPrimary]} onPress={goRandom}>
+                  <Text style={styles.btnPrimaryText}>Get directions</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.powered}>Photos from randomuser.me / pravatar.cc</Text>
+            </View>
           </View>
-          <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#eee", padding: 12, alignItems: "center" }}>
-            <TouchableOpacity style={styles.cardBtn} onPress={() => { setShowCard(false); routeToFake(); }}>
-              <Text style={{ color: "#fff", fontWeight: "700" }}>Get Directions 😈</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.cardClose} onPress={() => setShowCard(false)}>
-            <Text style={{ fontSize: 16 }}>✕</Text>
-          </TouchableOpacity>
         </View>
-      )}
-
-      {/* HUD above home indicator */}
-      {route && (
-        <View style={[styles.hud, { bottom: insets.bottom + 12 }]}>
-          <Text style={{ color: "#fff" }}>
-            {modeEmoji[mode]} {mode.toUpperCase()} • <Text style={{ fontWeight: "700" }}>{fmtDist(route.distance)}</Text> • ~<Text style={{ fontWeight: "700" }}>{fmtMins(route.minutes)}</Text>
-          </Text>
-        </View>
-      )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
-export default function App() {
-  return (
-    <SafeAreaProvider>
-      <InnerApp />
-    </SafeAreaProvider>
-  );
-}
-
-/* ---- styles ---- */
 const styles = StyleSheet.create({
-  controlsWrap: { position: "absolute", left: 0, right: 0 },
+  root: { flex: 1, backgroundColor: "#000" },
+  mapWrap: { flex: 1 },
+
+  // --- Controls ---
   controls: {
-    marginHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(255,255,255,0.92)", padding: 8, borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8, elevation: 4
+    position: "absolute", top: 8, left: 0, right: 0, alignItems: "center", zIndex: 20,
   },
-  searchWrap: { flex: 1, position: "relative" },
-  input: { height: 42, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "rgba(0,0,0,0.2)", backgroundColor: "#fff" },
-  resultsBox: {
-    position: "absolute", top: 46, left: 0, right: 0, maxHeight: 280, backgroundColor: "#fff",
-    borderWidth: 1, borderColor: "rgba(0,0,0,0.2)", borderRadius: 10, overflow: "hidden"
+  searchWrap: {
+    position: "relative",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.12)",
+    ...Platform.select({ android: { elevation: 3 }, ios: { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } } })
   },
-  resultRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
-  pin: { width: 18, height: 18, borderRadius: 9, backgroundColor: "#ff4da6", opacity: 0.9 },
-  rMain: { fontWeight: "700", fontSize: 13 },
-  rSub: { fontSize: 12, color: "#555" },
-  rDist: { marginLeft: "auto", fontSize: 12, color: "#111" },
-  modes: { flexDirection: "row", gap: 6, backgroundColor: "#fff", borderWidth: 1, borderColor: "rgba(0,0,0,0.15)", borderRadius: 10, padding: 4 },
-  mode: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent" },
-  modeActive: { backgroundColor: "#f7f7f9", borderColor: "rgba(0,0,0,0.15)" },
-  modeLabel: { fontSize: 13 },
-  go: { backgroundColor: "#ff4da6", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
-  blueDotOuter: { width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
-  blueDotInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#1a73e8" },
-  card: {
-    position: "absolute", left: "8%", backgroundColor: "#fff", borderRadius: 14,
-    overflow: "hidden", elevation: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12
+  search: {
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: "#111", width: "100%",
+    borderRadius: 12,
   },
-  cardBtn: { backgroundColor: "#ff4da6", paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10 },
-  cardClose: {
-    position: "absolute", top: 8, right: 10, backgroundColor: "rgba(255,255,255,0.9)", width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center",
-    shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4
+  results: {
+    position: "absolute", top: 46, left: -1, right: -1, maxHeight: 280,
+    backgroundColor: "#fff",
+    borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.12)",
+    overflow: "hidden",
   },
-  hud: {
-    position: "absolute", alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.85)", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10
+  resultRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  pin: { width: 16, height: 16, borderRadius: 8, backgroundColor: "#ff4da6" },
+  rMain: { fontWeight: "700", fontSize: 13, color: "#111" },
+  rSub: { fontSize: 12, color: "#666" },
+
+  modeBar: {
+    flexDirection: "row", marginTop: 8, backgroundColor: "#fff", padding: 4, borderRadius: 10,
+    borderWidth: 1, borderColor: "rgba(0,0,0,0.12)",
   },
+  pill: {
+    flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 10,
+    borderRadius: 8, borderWidth: 1, borderColor: "transparent",
+  },
+  pillActive: { backgroundColor: "#f7f7f9", borderColor: "rgba(0,0,0,0.15)" },
+  pillEmoji: { fontSize: 16 },
+  pillText: { fontSize: 13, color: "#222", fontWeight: "600" },
+  pillTextActive: { color: "#000" },
+
+  goBtn: {
+    marginTop: 8, backgroundColor: "#ff4da6", borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,
+    ...Platform.select({ android: { elevation: 2 }, ios: { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } } })
+  },
+  goText: { color: "#111", fontWeight: "800", letterSpacing: 0.2 },
+
+  // --- Card ---
+  card: { position: "absolute", right: 16, bottom: 16, zIndex: 15, maxWidth: 360 },
+  cardInner: {
+    backgroundColor: "#111", borderRadius: 16, overflow: "hidden",
+    ...Platform.select({ android: { elevation: 8 }, ios: { shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 10 } } })
+  },
+  cardHeader: {
+    color: "#fff", fontWeight: "800", fontSize: 15, paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: "#111",
+    // gradient-like strip
+  },
+  face: { width: "100%", height: 180, backgroundColor: "#222" },
+  row: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  name: { color: "#fff", fontSize: 18, fontWeight: "800", flexShrink: 1 },
+  pill: { color: "#fff", backgroundColor: "#1f1f1f", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, fontSize: 12 },
+  sub: { color: "#cfcfcf", fontSize: 13, marginTop: 6 },
+  actions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  btn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  btnGhost: { backgroundColor: "#232323" },
+  btnGhostText: { color: "#fff", fontWeight: "800" },
+  btnPrimary: { backgroundColor: "#ff4da6" },
+  btnPrimaryText: { color: "#111", fontWeight: "900" },
+  powered: { color: "#9a9a9a", fontSize: 11, textAlign: "center", marginTop: 8, marginBottom: 4 },
 });
