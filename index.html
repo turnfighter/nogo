@@ -140,7 +140,6 @@
       transform: translateY(1px);
     }
 
-    
     /* Modes */
     .modes {
       display: flex;
@@ -150,8 +149,7 @@
       border-radius: 10px;
       padding: 4px;
     }
-    
-    
+
     .mode {
       display: flex;
       align-items: center;
@@ -163,7 +161,7 @@
       border: 1px solid transparent;
       font-size: 13px;
     }
-    
+
     .mode input {
       display: none;
     }
@@ -318,14 +316,13 @@
   <div id="toast"></div>
   <div id="map"></div>
 
-  <!-- Place Info Panel -->
-  <!-- Left-side Place Info Popup -->
-  <div id="placeCard" style="
+   <!-- Funny Random Person Popup -->
+    <div id="placeCard" style="
     display:none;
     position:absolute;
     top:80px;
     left:16px;
-    width:320px;
+    width:300px;
     background:#fff;
     border-radius:14px;
     box-shadow:0 4px 24px rgba(0,0,0,0.25);
@@ -334,40 +331,34 @@
     font-family:Inter, system-ui;
     animation:fadeIn 0.25s ease-out;
     ">
-    <img id="placeCardImg" src="" alt="Place image" style="width:100%; height:160px; object-fit:cover;">
-
+    <img id="placeCardImg" 
+        src="https://source.unsplash.com/600x400/?portrait,person,smile" 
+        alt="Profile" 
+        style="width:100%; height:180px; object-fit:cover;">
+    
     <div style="padding:12px 16px;">
-      <h3 id="placeCardName" style="margin:0; font-size:17px; font-weight:600;">McDonald's</h3>
-      <div style="font-size:13px; color:#666; margin-top:4px;">
-        ⭐ 3.5 (1,390) • $10–20 • Fast food restaurant
-      </div>
+        <h3 id="placeCardName" style="margin:0; font-size:17px; font-weight:600;">
+        Alex, 3 km away 😎
+        </h3>
+        <div id="placeCardDesc" style="font-size:13px; color:#555; margin-top:4px;">
+        “Just moved to the neighborhood — come say hi 👋”
+        </div>
     </div>
 
-    <div
-      style="display:flex; justify-content:space-around; padding:8px 0; border-top:1px solid #eee; border-bottom:1px solid #eee;">
-      <button class="card-btn">Directions</button>
-      <button class="card-btn">Save</button>
-      <button class="card-btn">Nearby</button>
-      <button class="card-btn">Share</button>
-    </div>
-
-    <div
-      style="display:flex; justify-content:space-around; font-size:13px; padding:8px 0; color:#0077cc; border-bottom:1px solid #eee;">
-      <div>Overview</div>
-      <div>Menu</div>
-      <div>Reviews</div>
-      <div>About</div>
-    </div>
-
-    <div style="padding:10px 16px 16px 16px; font-size:13px; color:#444;">
-      Classic, long-running fast food chain known for burgers and fries 🍟.
+    <div style="
+        display:flex; justify-content:center; padding:12px 0; border-top:1px solid #eee;
+    ">
+        <button id="fakeDirectionsBtn" class="card-btn" 
+        style="background:#ff4da6; color:white; padding:8px 18px; border-radius:10px; font-weight:600; border:none; cursor:pointer;">
+        Get Directions 😈
+        </button>
     </div>
 
     <button id="placeCardClose" style="
         position:absolute; top:8px; right:10px; border:none; background:rgba(255,255,255,0.9);
         border-radius:50%; width:26px; height:26px; cursor:pointer; font-size:16px; box-shadow:0 1px 4px rgba(0,0,0,0.2);
     ">✕</button>
-  </div>
+    </div>
 
 
   <script>
@@ -461,7 +452,6 @@
       m.classList.add('active');
     });
 
-    
     /* === Transit speed (for bus/train ETA display only) === */
     function estimateTransitMinutes(distanceMeters, mode) {
       const dKm = distanceMeters / 1000;
@@ -800,22 +790,41 @@
     });
 
     /* === Left Popup Info Card === */
-    function showPlaceCard(name, imgSrc) {
-      const card = document.getElementById('placeCard');
-      const img = document.getElementById('placeCardImg');
-      const title = document.getElementById('placeCardName');
+    // Randomized funny names and captions
+    const funnyProfiles = [
+    { name: "Alex", quote: "Just moved to the neighborhood — come say hi 👋" },
+    { name: "Jordan", quote: "Looking for someone to explore nearby spots with 🗺️" },
+    { name: "Taylor", quote: "You’ll never guess where I am 😏" },
+    { name: "Sam", quote: "Says they know a shortcut... don’t trust them 😈" },
+    { name: "Riley", quote: "Apparently only 2 km away. Suspicious 🤔" }
+    ];
 
-      title.textContent = name;
-      img.src = imgSrc || 'https://upload.wikimedia.org/wikipedia/commons/6/6f/No_image_available_500_x_500.svg';
-      card.style.display = 'block';
+   function showPlaceCard() {
+        const card = document.getElementById("placeCard");
+        const img = document.getElementById("placeCardImg");
+
+        const profile = funnyProfiles[Math.floor(Math.random() * funnyProfiles.length)];
+        document.getElementById("placeCardName").textContent = `${profile.name}, ${Math.floor(Math.random()*5)+1} km away 😎`;
+        document.getElementById("placeCardDesc").textContent = `"${profile.quote}"`;
+
+        const randomNum = Math.floor(Math.random() * 5) + 1;
+        img.src = `images/person${randomNum}.jpg`;
+
+        card.style.display = "block";
     }
 
-    function hidePlaceCard() {
-      document.getElementById('placeCard').style.display = 'none';
+    // Handle fake “Get Directions”
+    document.getElementById("fakeDirectionsBtn").addEventListener("click", async () => {
+    hidePlaceCard();
+    const mode = getSelectedMode();
+    showToast("Locating new friend 🗺️ ...");
+    try {
+        const fakeSnapped = await pickFakeRoutableTarget(startLatLng, mode, 5, 6);
+        routeToFakeDestination(fakeSnapped, mode);
+    } catch (e) {
+        showToast("They disappeared into the void 😅");
     }
-
-    document.getElementById('placeCardClose').addEventListener('click', hidePlaceCard);
-    
+    });
   </script>
   <!-- Right-click context menu -->
   <div id="ctxmenu" class="ctxmenu"></div>
