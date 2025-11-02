@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>Rizz Directions 😈</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Routing machine -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <style>
+    :root {
+      --pink: #ff4da6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    #map {
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .controls {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      z-index: 1001;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px 10px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      backdrop-filter: blur(6px);
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .searchwrap {
+      position: relative;
+    }
+
+    #destination {
+      width: 300px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      font-size: 14px;
+      outline: none;
+    }
+
+    #go {
+      background: var(--pink);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #go:active {
+      transform: translateY(1px);
+    }
+
+    .modes {
+      display: flex;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      border-radius: 10px;
+      padding: 4px;
+    }
+
+    .mode {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+      border: 1px solid transparent;
+      font-size: 13px;
+    }
+
+    .mode input {
+      display: none;
+    }
+
+    .mode.active {
+      background: #f7f7f9;
+      border-color: rgba(0, 0, 0, 0.15);
+    }
+
+    .mode .emoji {
+      font-size: 16px;
+    }
+
+    .vibes {
+      display: flex;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      border-radius: 10px;
+      padding: 4px;
+    }
+
+    .vibe {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+      border: 1px solid transparent;
+      font-size: 12px;
+    }
+
+    .vibe input {
+      display: none;
+    }
+
+    .vibe.active {
+      background: #f7f7f9;
+      border-color: rgba(0, 0, 0, 0.15);
+    }
+
+    .vibe .emoji {
+      font-size: 16px;
+    }
+
+    #results {
+      position: absolute;
+      top: 44px;
+      left: 0;
+      right: 0;
+      max-height: 280px;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
+      display: none;
+      z-index: 1002;
+    }
+
+    .result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+    }
+
+    .result:hover,
+    .result.active {
+      background: #f7f7f9;
+    }
+
+    .pin {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--pink);
+      opacity: 0.9;
+      flex: 0 0 18px;
+    }
+
+    .rmain {
+      font-weight: 600;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .rsub {
+      font-size: 12px;
+      color: #555;
+    }
+
+    .rdist {
+      margin-left: auto;
+      font-size: 12px;
+      color: #111;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #toast {
+      position: absolute;
+      left: 50%;
+      top: 70px;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 10px;
+      display: none;
+      font-size: 13px;
+      z-index: 1003;
+    }
+
+    /* === Right-click menu + ruler bits === */
+    .contextmenu {
+      position: absolute;
+      z-index: 2001;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, .15);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+      display: none;
+      min-width: 180px;
+      overflow: hidden;
+    }
+
+    .contextmenu button {
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .contextmenu button:hover {
+      background: #f7f7f9;
+    }
+
+    .measure-label {
+      background: #111;
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+    }
+
+    .ruler-badge {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 1002;
+      background: rgba(17, 17, 17, .9);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      display: none;
+      backdrop-filter: blur(4px);
+    }
+
+    @media (max-width: 840px) {
+      #destination {
+        width: 220px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      #destination {
+        width: 180px;
+      }
+
+      .mode span.label,
+      .vibe span.label {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="controls">
+    <div class="searchwrap">
+      <input id="destination" placeholder="Search for a place..." autocomplete="off" />
+      <div id="results"></div>
+    </div>
+
+    <div class="modes" id="modes">
+      <label class="mode active" data-mode="car" title="Car">
+        <input type="radio" name="mode" value="car" checked />
+        <span class="emoji">🚗</span><span class="label">Car</span>
+      </label>
+      <label class="mode" data-mode="walk" title="Walking">
+        <input type="radio" name="mode" value="walk" />
+        <span class="emoji">🚶</span><span class="label">Walk</span>
+      </label>
+      <label class="mode" data-mode="bus" title="Bus">
+        <input type="radio" name="mode" value="bus" />
+        <span class="emoji">🚌</span><span class="label">Bus</span>
+      </label>
+      <label class="mode" data-mode="train" title="Train">
+        <input type="radio" name="mode" value="train" />
+        <span class="emoji">🚆</span><span class="label">Train</span>
+      </label>
+    </div>
+
+    <!-- NEW: Route Vibes toggle -->
+    <div class="vibes" id="vibes">
+      <label class="vibe active" data-vibe="normal" title="Default scoring">
+        <input type="radio" name="vibe" value="normal" checked />
+        <span class="emoji">🙂</span><span class="label">Normal</span>
+      </label>
+      <label class="vibe" data-vibe="lefty" title="Prefer left turns">
+        <input type="radio" name="vibe" value="lefty" />
+        <span class="emoji">↩️</span><span class="label">Left-turn Bias</span>
+      </label>
+      <label class="vibe" data-vibe="scenic" title="Add a playful detour">
+        <input type="radio" name="vibe" value="scenic" />
+        <span class="emoji">🌳</span><span class="label">Scenic Detour</span>
+      </label>
+      <label class="vibe" data-vibe="bridgefree" title="Avoid bridges/ferries when possible">
+        <input type="radio" name="vibe" value="bridgefree" />
+        <span class="emoji">🌉</span><span class="label">Bridge Avoider</span>
+      </label>
+      <label class="vibe" data-vibe="nohw" title="Exclude motorways">
+        <input type="radio" name="vibe" value="nohw" />
+        <span class="emoji">🛣️</span><span class="label">No Highways</span>
+      </label>
+      <label class="vibe" data-vibe="roundabout" title="Seek roundabouts">
+        <input type="radio" name="vibe" value="roundabout" />
+        <span class="emoji">🌀</span><span class="label">Roundabout Enjoyer</span>
+      </label>
+      <label class="vibe" data-vibe="straight" title="Fewer turns">
+        <input type="radio" name="vibe" value="straight" />
+        <span class="emoji">📏</span><span class="label">Straight-Line Chad</span>
+      </label>
+    </div>
+
+    <button id="go">Go</button>
+  </div>
+
+  <!-- Toast + ruler UI + context menu -->
+  <div id="toast"></div>
+  <div id="rulerBadge" class="ruler-badge"></div>
+  <div id="ctx" class="contextmenu">
+    <button id="ctxStart">▶ Start/Continue measuring</button>
+    <button id="ctxFinish">✓ Finish measurement</button>
+    <button id="ctxClear">✕ Clear measurement</button>
+    <hr style="margin:0;border:none;border-top:1px solid rgba(0,0,0,.08)">
+    <button id="ctxCopy">📋 Copy coordinates</button>
+  </div>
+
+  <div id="map"></div>
+
+  <script>
+    /* --- Toast helper --- */
+    function showToast(msg, ms = 2000) {
+      const t = document.getElementById('toast');
+      t.innerHTML = msg; t.style.display = 'block';
+      clearTimeout(t._tid);
+      t._tid = setTimeout(() => t.style.display = 'none', ms);
+    }
+
+    /* --- Math helpers --- */
+    function toRad(d) { return d * Math.PI / 180; }
+    function toDeg(r) { return r * 180 / Math.PI; }
+
+    /* Haversine distance (meters) */
+    function haversine(a, b) {
+      const R = 6371e3;
+      const φ1 = toRad(a.lat), λ1 = toRad(a.lng);
+      const φ2 = toRad(b.lat), λ2 = toRad(b.lng);
+      const dφ = φ2 - φ1, dλ = λ2 - λ1;
+      const s = Math.sin(dφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    function fmtDist(m) { return (m < 1000) ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 5000 ? 1 : 0)} km`; }
+    function fmtMins(min) {
+      if (min < 60) return `${Math.round(min)} min`;
+      const h = Math.floor(min / 60), m = Math.round(min % 60);
+      return `${h} hr ${m ? m + ' min' : ''}`.trim();
+    }
+
+    /* --- Utility: random nearby point --- */
+    function destPoint(lat, lon, distanceMeters, bearingRad) {
+      const R = 6371e3;
+      const φ1 = toRad(lat), λ1 = toRad(lon);
+      const δ = distanceMeters / R, θ = bearingRad;
+      const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+      const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+      return { lat: toDeg(φ2), lon: ((toDeg(λ2) + 540) % 360) - 180 };
+    }
+
+    /* --- Map setup --- */
+    let map, userMarker, startLatLng, routing, transitLayer;
+
+    // --- Base/overlay tile layers ---
+    const osmStreets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '&copy; OpenStreetMap contributors' });
+
+    const esriSat1 = L.tileLayer(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN, and the GIS User Community' }
+    );
+    const esriSat2 = L.tileLayer(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '' }
+    );
+    const esriLabels = L.tileLayer(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      { attribution: '&copy; Esri' }
+    );
+    const satWithLabels = L.layerGroup([esriSat2, esriLabels]);
+
+    const baseMaps = {
+      'Streets': osmStreets,
+      'Satellite': esriSat1,
+      'Satellite + Labels': satWithLabels
+    };
+
+    function initMap(lat, lon) {
+      map = L.map('map', { center: [lat, lon], zoom: 14, layers: [esriSat1] });
+      L.control.layers(baseMaps, null, { position: 'topright', collapsed: true }).addTo(map);
+
+      startLatLng = L.latLng(lat, lon);
+      userMarker = L.marker(startLatLng).addTo(map).bindPopup("You are here 📍").openPopup();
+
+      // === Right-click context menu + ruler ===
+      setupContextMenu();
+    }
+
+    /* === Mode handling === */
+    function getSelectedMode() {
+      const el = document.querySelector('.modes .mode.active');
+      return el ? el.dataset.mode : 'car';
+    }
+    document.getElementById('modes').addEventListener('click', (e) => {
+      const m = e.target.closest('.mode'); if (!m) return;
+      document.querySelectorAll('.modes .mode').forEach(x => x.classList.remove('active'));
+      m.classList.add('active');
+    });
+
+    /* === Vibe handling === */
+    function getSelectedVibe() {
+      const el = document.querySelector('.vibes .vibe.active');
+      return el ? el.dataset.vibe : 'normal';
+    }
+    document.getElementById('vibes').addEventListener('click', (e) => {
+      const v = e.target.closest('.vibe'); if (!v) return;
+      document.querySelectorAll('.vibes .vibe').forEach(x => x.classList.remove('active'));
+      v.classList.add('active');
+    });
+
+    /* === Transit speed & penalty model (hackathon-simple) === */
+    function estimateTransitMinutes(distanceMeters, mode) {
+      const dKm = distanceMeters / 1000;
+      const speeds = { bus: 22, train: 80 };
+      const wait = { bus: 3 + Math.random() * 7, train: 5 + Math.random() * 15 };
+      const move = (dKm / speeds[mode]) * 60;
+      return move + wait[mode];
+    }
+
+    /* --- Helpers for vibes scoring --- */
+    function bearing(a, b) {
+      const φ1 = toRad(a.lat), φ2 = toRad(b.lat);
+      const Δλ = toRad(b.lng - a.lng);
+      const y = Math.sin(Δλ) * Math.cos(φ2);
+      const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+      let brng = Math.atan2(y, x) * 180 / Math.PI;
+      return (brng + 360) % 360;
+    }
+    function turnAngles(coords) {
+      // Return stats: total abs turn, left count, right count
+      if (!coords || coords.length < 3) return { totalAbs: 0, left: 0, right: 0 };
+      let totalAbs = 0, left = 0, right = 0;
+      // sample every ~10th point to reduce noise
+      const step = Math.max(1, Math.floor(coords.length / 200));
+      const pts = coords.filter((_, i) => i % step === 0);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const b1 = bearing(pts[i - 1], pts[i]);
+        const b2 = bearing(pts[i], pts[i + 1]);
+        let delta = ((b2 - b1 + 540) % 360) - 180; // signed turn (-180..180)
+        totalAbs += Math.abs(delta);
+        if (delta < -5) left++;
+        else if (delta > 5) right++;
+      }
+      return { totalAbs, left, right };
+    }
+    function hasBridgey(stepName) {
+      if (!stepName) return false;
+      const s = stepName.toLowerCase();
+      return /bridge|pont|puente|ponte|brg|viaduct/.test(s);
+    }
+
+    /* --- Scenic mid-way detour point (offset perpendicular) --- */
+    function scenicWaypoint(a, b) {
+      const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+      const brg = bearing(a, b) * Math.PI / 180;
+      const perp = brg + Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1);
+      const dist = (1000 + Math.random() * 2000); // 1–3 km
+      const p = destPoint(mid.lat, mid.lng, dist, perp);
+      return L.latLng(p.lat, p.lon);
+    }
+
+    /* --- Routing (still wrong on purpose 😈), with vibe scoring --- */
+    function routeToFakeDestination(fakeLatLng, mode, vibe) {
+      if (routing) { map.removeControl(routing); routing = null; }
+      if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
+      const profile = (mode === 'walk') ? 'foot' : 'car';
+
+      // Build waypoints; scenic vibe injects a playful mid waypoint
+      const wps = [startLatLng];
+      if (vibe === 'scenic') {
+        wps.push(scenicWaypoint(startLatLng, fakeLatLng));
+      }
+      wps.push(fakeLatLng);
+
+      // Extra OSRM URL params
+      const urlParams = { alternatives: 3, steps: true, overview: 'full', annotations: false };
+      if (vibe === 'nohw') { urlParams.exclude = 'motorway'; }
+      // Bridge Avoider: exclude ferries (helps sometimes)
+      if (vibe === 'bridgefree') { urlParams.exclude = (urlParams.exclude ? urlParams.exclude + ',ferry' : 'ferry'); }
+
+      routing = L.Routing.control({
+        waypoints: wps,
+        router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile, urlParameters: urlParams }),
+        lineOptions: { styles: [{ color: '#ffd1e8', opacity: 0.6, weight: 8 }, { color: '#ff4da6', opacity: 0.95, weight: 5 }] },
+        addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true, show: false,
+        routeWhileDragging: false
+      }).addTo(map);
+
+      routing.on('routesfound', e => {
+        const routes = e.routes || [];
+        if (!routes.length) return;
+
+        // Decide “best” route per vibe
+        const scored = routes.map((r, idx) => {
+          const distM = r.summary.totalDistance;
+          const coords = (r.coordinates || []).map(ll => ({ lat: ll.lat, lng: ll.lng }));
+          const t = turnAngles(coords);
+
+          // Estimate transit ETA for bus/train, otherwise OSRM seconds
+          let etaMin = (mode === 'bus' || mode === 'train') ? estimateTransitMinutes(distM, mode) : r.summary.totalTime / 60;
+
+          // Count “bridgey” steps & roundabouts
+          let bridges = 0, roundabouts = 0;
+          (r.instructions || []).forEach(step => {
+            if (hasBridgey(step.road)) bridges++;
+            if (/roundabout|rotary/i.test(step.text || '')) roundabouts++;
+          });
+
+          // Score per vibe (lower is better)
+          let score = distM;
+          switch (vibe) {
+            case 'normal':
+              score = distM + etaMin * 5; break;
+            case 'lefty':
+              score = distM + (t.right * 2000) - (t.left * 200); break;
+            case 'scenic':
+              score = -distM; /* prefer longer */ break;
+            case 'bridgefree':
+              score = distM + bridges * 50000; break;
+            case 'nohw':
+              score = distM; break;
+            case 'roundabout':
+              score = distM - roundabouts * 30000 + t.totalAbs * 50; break;
+            case 'straight':
+              score = distM + t.totalAbs * 200 - (Math.abs(t.left - t.right) * 100); break;
+          }
+          return { idx, r, score, distM, etaMin, t, bridges, roundabouts };
+        });
+
+        scored.sort((a, b) => a.score - b.score);
+        const best = scored[0];
+
+        // Select the best alternative (uses LRM internal method)
+        if (typeof routing._selectRoute === 'function') {
+          routing._selectRoute(routing._routes[best.idx]);
+        }
+
+        const modeEmoji = { car: '🚗', walk: '🚶', bus: '🚌', train: '🚆' }[mode];
+        const vibeLabel = {
+          normal: 'Normal', lefty: 'Left-turn Bias', scenic: 'Scenic Detour',
+          bridgefree: 'Bridge Avoider', nohw: 'No Highways',
+          roundabout: 'Roundabout Enjoyer', straight: 'Straight-Line Chad'
+        }[vibe] || 'Normal';
+
+        const msg = `${modeEmoji} ${mode.toUpperCase()} • <b>${fmtDist(best.distM)}</b> • ~<b>${fmtMins(best.etaMin)}</b><br><small>Vibe: ${vibeLabel}</small>`;
+        L.marker(wps[wps.length - 1]).addTo(map).bindPopup(`Rerouted with vibe: <b>${vibeLabel}</b> 😈<br>${msg}`).openPopup();
+      });
+
+      routing.on('routingerror', () => {
+        showToast('Could not find a road there — trying again...');
+        const alt = makeRandomNearbyTarget(startLatLng, 5);
+        routeToFakeDestination(alt, mode, vibe);
+      });
+    }
+
+    /* --- Create random nearby lat/lon within radius --- */
+    function makeRandomNearbyTarget(center, radiusKm) {
+      const dKm = (radiusKm * (0.3 + 0.7 * Math.random()));
+      const bearingRad = Math.random() * 2 * Math.PI;
+      const p = destPoint(center.lat, center.lng, dKm * 1000, bearingRad);
+      return L.latLng(p.lat, p.lon);
+    }
+
+    /* --- Geolocation --- */
+    (function start() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+          initMap(pos.coords.latitude, pos.coords.longitude);
+          showToast('Live location found!');
+          if (destinationEl.value.trim().length) debounceSearch();
+        }, () => {
+          showToast('Location blocked — starting in Toronto.');
+          initMap(43.6532, -79.3832);
+        }, { enableHighAccuracy: true, timeout: 8000 });
+      } else {
+        initMap(43.6532, -79.3832);
+      }
+    })();
+
+    /* ==========================
+       Autocomplete place search
+       API: Photon/Komoot (OSM)
+       ========================== */
+    const destinationEl = document.getElementById('destination');
+    const resultsEl = document.getElementById('results');
+    let currentResults = [];
+    let activeIndex = -1;
+    let chosenPlace = null;
+
+    function debounce(fn, wait = 250) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), wait); }; }
+    function featureName(f) {
+      const p = f.properties || {};
+      const parts = [p.name, p.street, p.housenumber, p.city || p.town || p.village, p.state, p.country].filter(Boolean);
+      return Array.from(new Set(parts)).join(', ');
+    }
+
+    async function searchPlaces(q) {
+      if (!q) { hideResults(); return; }
+      const bias = startLatLng || L.latLng(43.6532, -79.3832);
+      const url = new URL('https://photon.komoot.io/api/');
+      url.searchParams.set('q', q); url.searchParams.set('limit', '8');
+      url.searchParams.set('lat', String(bias.lat)); url.searchParams.set('lon', String(bias.lng)); url.searchParams.set('lang', 'en');
+
+      try {
+        const res = await fetch(url.toString(), { method: 'GET' });
+        const data = await res.json();
+        const feats = (data.features || []).map(f => {
+          const name = featureName(f) || (f.properties && f.properties.osm_value) || 'Unnamed place';
+          const coords = L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]);
+          const dist = haversine(bias, coords);
+          return { name, coords, dist, raw: f };
+        });
+        feats.sort((a, b) => a.dist - b.dist);
+        currentResults = feats; activeIndex = -1; renderResults(feats);
+      } catch (e) {
+        console.error(e); showToast('Search failed. Try again.'); hideResults();
+      }
+    }
+
+    function renderResults(items) {
+      if (!items.length) { hideResults(); return; }
+      resultsEl.innerHTML = items.map((it, i) => `
+    <div class="result" data-index="${i}">
+      <div class="pin"></div>
+      <div>
+        <div class="rmain">${escapeHtml(it.name)}</div>
+        <div class="rsub">${escapeHtml((it.raw.properties && it.raw.properties.type) || 'POI')}</div>
+      </div>
+      <div class="rdist">${fmtDist(it.dist)}</div>
+    </div>`).join('');
+      resultsEl.style.display = 'block';
+    }
+    function hideResults() { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; currentResults = []; activeIndex = -1; }
+    function escapeHtml(s) { return s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+    function chooseIndex(i) {
+      if (i < 0 || i >= currentResults.length) return;
+      const item = currentResults[i];
+      destinationEl.value = item.name; chosenPlace = item; highlightActive(i); hideResults();
+    }
+    function highlightActive(i) { Array.from(resultsEl.children).forEach((el, idx) => { if (idx === i) el.classList.add('active'); else el.classList.remove('active'); }); }
+    function moveActive(delta) {
+      if (!currentResults.length) return;
+      activeIndex = ((activeIndex + delta) % currentResults.length + currentResults.length) % currentResults.length;
+      highlightActive(activeIndex);
+    }
+    const debounceSearch = debounce(() => searchPlaces(destinationEl.value.trim()), 250);
+    destinationEl.addEventListener('input', () => { chosenPlace = null; debounceSearch(); });
+    destinationEl.addEventListener('keydown', (e) => {
+      if (resultsEl.style.display !== 'block') return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+      else if (e.key === 'Enter') { if (activeIndex >= 0) { e.preventDefault(); chooseIndex(activeIndex); } else hideResults(); }
+      else if (e.key === 'Escape') { hideResults(); }
+    });
+    resultsEl.addEventListener('mousedown', (e) => {
+      const card = e.target.closest('.result'); if (!card) return;
+      const i = Number(card.getAttribute('data-index')); chooseIndex(i);
+    });
+    document.addEventListener('click', (e) => { if (!e.target.closest('.searchwrap')) hideResults(); });
+
+    document.getElementById('go').addEventListener('click', () => {
+      const text = destinationEl.value.trim(); if (!text) return alert("Type a destination first!");
+      const mode = getSelectedMode();
+      const vibe = getSelectedVibe();
+      if (chosenPlace) {
+        const d = fmtDist(haversine(startLatLng, chosenPlace.coords));
+        showToast(`${mode.toUpperCase()} to “${chosenPlace.name}” is ${d}. Calculating (${vibe})...`);
+      } else {
+        showToast(`Searching “${text}” then calculating route (${mode}, ${vibe})...`);
+      }
+      setTimeout(() => { const fake = makeRandomNearbyTarget(startLatLng, 5); routeToFakeDestination(fake, mode, vibe); }, 400);
+    });
+
+    /* ===========================================================
+       RIGHT-CLICK CONTEXT MENU + MEASURE TOOL (no external plugin)
+       =========================================================== */
+    let measurePts = [];
+    let measureLine = null;
+    let measureLabels = L.layerGroup();
+    let measuring = false;
+    let lastCtxLatLng = null;
+
+    const ctx = document.getElementById('ctx');
+    const btnStart = document.getElementById('ctxStart');
+    const btnFinish = document.getElementById('ctxFinish');
+    const btnClear = document.getElementById('ctxClear');
+    const btnCopy = document.getElementById('ctxCopy');
+    const badge = document.getElementById('rulerBadge');
+
+    function setupContextMenu() {
+      measureLabels.addTo(map);
+
+      // Open context menu on right-click
+      map.on('contextmenu', (e) => {
+        lastCtxLatLng = e.latlng;
+        positionMenu(e.originalEvent);
+        updateMenuState();
+        ctx.style.display = 'block';
+      });
+
+      // Hide menu when interacting elsewhere
+      map.on('click dragstart zoomstart', hideMenu);
+      document.addEventListener('scroll', hideMenu);
+
+      btnStart.onclick = () => { addMeasurePoint(lastCtxLatLng); hideMenu(); };
+      btnFinish.onclick = () => { measuring = false; hideMenu(); showToast('Measurement finished'); };
+      btnClear.onclick = () => { clearMeasurement(); hideMenu(); };
+      btnCopy.onclick = async () => {
+        const { lat, lng } = lastCtxLatLng;
+        await navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+        showToast('Copied coordinates to clipboard'); hideMenu();
+      };
+    }
+
+    function positionMenu(ev) {
+      const mx = ev.pageX, my = ev.pageY;
+      ctx.style.left = mx + 'px'; ctx.style.top = my + 'px';
+    }
+
+    function hideMenu() { ctx.style.display = 'none'; }
+    function updateMenuState() {
+      btnFinish.disabled = measurePts.length < 2;
+      btnClear.disabled = measurePts.length === 0;
+    }
+
+    /* Add a point to the current measurement */
+    function addMeasurePoint(latlng) {
+      measuring = true;
+      measurePts.push(L.latLng(latlng.lat, latlng.lng));
+
+      // Create or update the polyline
+      if (!measureLine) {
+        measureLine = L.polyline(measurePts, {
+          color: '#00aaff', weight: 4, opacity: 0.9, dashArray: '6,6'
+        }).addTo(map);
+      } else {
+        measureLine.setLatLngs(measurePts);
+      }
+
+      // Segment label (distance from previous point)
+      if (measurePts.length > 1) {
+        const a = measurePts[measurePts.length - 2];
+        const b = measurePts[measurePts.length - 1];
+        const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+        const seg = haversine(a, b);
+        L.marker(mid, {
+          interactive: false,
+          icon: L.divIcon({ className: 'measure-label', html: fmtDist(seg) })
+        }).addTo(measureLabels);
+      }
+
+      updateTotalBadge();
+      updateMenuState();
+    }
+
+    /* Running total badge */
+    function updateTotalBadge() {
+      if (measurePts.length < 1) { badge.style.display = 'none'; return; }
+      let total = 0;
+      for (let i = 1; i < measurePts.length; i++) {
+        total += haversine(measurePts[i - 1], measurePts[i]);
+      }
+      badge.textContent = `Ruler: ${fmtDist(total)}  (${measurePts.length} pts) — Right-click to add, “Finish” to lock`;
+      badge.style.display = 'block';
+    }
+
+    /* Clear all measuring graphics */
+    function clearMeasurement() {
+      measurePts = [];
+      measuring = false;
+      if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+      measureLabels.clearLayers();
+      badge.style.display = 'none';
+      updateMenuState();
+    }
+  </script>
+</body>
+
+</html>
