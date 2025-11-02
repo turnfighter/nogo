@@ -14,6 +14,249 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
 
+  <!-- Hot Singles Nearby: HTML + CSS -->
+  <style>
+    .hsn-card {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      width: 320px;
+      max-width: 94vw;
+      background: #111;
+      color: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .35);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      z-index: 10050;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .hsn-header {
+      padding: 12px 16px;
+      background: linear-gradient(135deg, #ff4da6, #7b5cff);
+      font-weight: 700;
+      font-size: 15px
+    }
+
+    .hsn-face {
+      width: 100%;
+      aspect-ratio: 16/10;
+      object-fit: cover;
+      background: #222;
+      display: block
+    }
+
+    .hsn-body {
+      padding: 12px 12px 14px
+    }
+
+    .hsn-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px
+    }
+
+    .hsn-name {
+      font-weight: 700;
+      font-size: 18px
+    }
+
+    .hsn-pill {
+      font-size: 12px;
+      background: #1f1f1f;
+      padding: 4px 8px;
+      border-radius: 999px;
+      opacity: .9
+    }
+
+    .hsn-sub {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #cfcfcf;
+      line-height: 1.35
+    }
+
+    .hsn-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px
+    }
+
+    .hsn-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 0;
+      cursor: pointer;
+      font-weight: 700
+    }
+
+    .hsn-btn.primary {
+      background: #ff4da6;
+      color: #111
+    }
+
+    .hsn-btn.ghost {
+      background: #232323;
+      color: #fff
+    }
+
+    .hsn-powered {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #9a9a9a;
+      text-align: center
+    }
+  </style>
+
+  <div class="hsn-card" id="hsnCard" aria-live="polite">
+    <div class="hsn-header">🔥 Hot singles in your area</div>
+    <img id="hsnFace" class="hsn-face" alt="Nearby match" referrerpolicy="no-referrer">
+    <div class="hsn-body">
+      <div class="hsn-row">
+        <div class="hsn-name" id="hsnName">Loading…</div>
+        <div class="hsn-pill" id="hsnAge">–</div>
+        <div class="hsn-pill" id="hsnDistance">– km away</div>
+      </div>
+      <div class="hsn-sub" id="hsnTagline">Refreshing your fated match…</div>
+      <div class="hsn-actions">
+        <button class="hsn-btn ghost" id="hsnNew">New match</button>
+        <button class="hsn-btn primary" id="hsnRoute">Get directions</button>
+      </div>
+      <div class="hsn-powered">Photos from thispersondoesnotexist.com</div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // Wait until Leaflet, LRM, and your global `map` exist
+      const ready = () => window.map && window.L && L.Routing;
+      const wait = setInterval(() => {
+        if (!ready()) return;
+        clearInterval(wait);
+        boot();
+      }, 50);
+
+      function boot() {
+        // ---- Config ----
+        const ROUTE_RADIUS_MIN_M = 1200, ROUTE_RADIUS_MAX_M = 6000, MAX_ROUTE_TRIES = 6;
+        const OSRM_SERVICE = 'https://router.project-osrm.org/route/v1';
+
+        // ---- DOM ----
+        const imgEl = document.getElementById('hsnFace');
+        const nameEl = document.getElementById('hsnName');
+        const ageEl = document.getElementById('hsnAge');
+        const distEl = document.getElementById('hsnDistance');
+        const tagEl = document.getElementById('hsnTagline');
+        const btnNew = document.getElementById('hsnNew');
+        const btnGo = document.getElementById('hsnRoute');
+
+        // ---- Helpers ----
+        const firstNames = ['Avery', 'Jordan', 'Riley', 'Taylor', 'Morgan', 'Elliot', 'Rowan', 'Charlie', 'Reese', 'Skyler', 'Alex', 'Quinn', 'Peyton', 'Dakota', 'Casey', 'Remy', 'Jamie', 'Harper', 'Sage', 'Kai'];
+        const lastNames = ['Hart', 'Rivera', 'Quinn', 'Stone', 'Bennett', 'Sutton', 'Hayes', 'Reid', 'Brooks', 'Cole', 'Ramos', 'Blake', 'Parker', 'Lane', 'Ellis', 'Greer', 'Monroe', 'Jensen', 'Shaw', 'Wells'];
+        const taglines = [
+          '“Will swipe right for tacos 🌮.”',
+          '“Left turns only, sorry.”',
+          '“Scenic route > fastest route.”',
+          '“Professional third-wheeler.”',
+          '“Here for wrong directions & right vibes.”',
+          '“Dog person. Also maps person.”',
+          '“Let’s get lost (locally).”',
+          '“5⭐ date, 2⭐ navigator.”'
+        ];
+        const rp = a => a[Math.floor(Math.random() * a.length)];
+        const rName = () => `${rp(firstNames)} ${rp(lastNames)}`;
+        const rAge = () => Math.floor(18 + Math.random() * 21);
+        const seed = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+        // use weserv proxy to avoid CORS/referrer blocks
+        const faceURL = () => `https://images.weserv.nl/?url=thispersondoesnotexist.com/image&n=-1&il&af&${seed()}`;
+
+        function randomNearbyLatLng(origin, minM, maxM) {
+          const R = 6371000, d = minM + Math.random() * (maxM - minM), b = Math.random() * 2 * Math.PI;
+          const lat1 = origin.lat * Math.PI / 180, lon1 = origin.lng * Math.PI / 180;
+          const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) + Math.cos(lat1) * Math.sin(d / R) * Math.cos(b));
+          const lon2 = lon1 + Math.atan2(Math.sin(b) * Math.sin(d / R) * Math.cos(lat1), Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
+          return L.latLng(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI);
+        }
+        const kmDistance = (a, b) => a && b ? (map.distance(a, b) / 1000) : null;
+
+        // ---- Map / Router ----
+        let userLatLng = null;
+        let routingControl = null;
+
+        function ensureRouter() {
+          if (routingControl) return routingControl;
+          routingControl = L.Routing.control({
+            waypoints: [],
+            routeWhileDragging: false, addWaypoints: false, show: false, fitSelectedRoutes: true,
+            router: new L.Routing.OSRMv1({ serviceUrl: OSRM_SERVICE })
+          }).addTo(map);
+          return routingControl;
+        }
+
+        if (map.locate) {
+          map.locate({ setView: false, enableHighAccuracy: true })
+            .on('locationfound', e => userLatLng = e.latlng)
+            .on('locationerror', () => userLatLng = map.getCenter());
+        } else userLatLng = map.getCenter();
+
+        // ---- Card logic ----
+        function generateMatch() {
+          const origin = userLatLng || map.getCenter();
+          const tempDest = randomNearbyLatLng(origin, ROUTE_RADIUS_MIN_M, ROUTE_RADIUS_MAX_M);
+
+          nameEl.textContent = rName();
+          ageEl.textContent = String(rAge());
+          tagEl.textContent = rp(taglines);
+
+          const k = kmDistance(origin, tempDest);
+          distEl.textContent = (k != null) ? `${k.toFixed(1)} km away` : 'nearby';
+
+          imgEl.src = faceURL();
+          imgEl.onerror = () => { imgEl.src = `https://picsum.photos/seed/${seed()}/600/400`; };
+        }
+
+        async function routeRandom() {
+          const origin = userLatLng || map.getCenter();
+          try { ensureRouter(); } catch { tagEl.textContent = 'Routing unavailable.'; return; }
+
+          tagEl.textContent = 'Plotting a date spot nearby…';
+
+          let tries = 0, dest = null, ok = false, lastErr = null;
+          while (tries < MAX_ROUTE_TRIES && !ok) {
+            tries++; dest = randomNearbyLatLng(origin, ROUTE_RADIUS_MIN_M, ROUTE_RADIUS_MAX_M);
+            try {
+              await new Promise((res, rej) => {
+                const t = setTimeout(() => rej(new Error('Timeout')), 6000);
+                routingControl.setWaypoints([origin, dest]);
+                routingControl.once('routesfound', e => { clearTimeout(t); res(e); });
+                routingControl.once('routingerror', e => { clearTimeout(t); rej(e); });
+              });
+              ok = true;
+            } catch (e) { lastErr = e; }
+          }
+          if (!ok) { console.warn('Routing failed', lastErr); tagEl.textContent = 'Could not find a local spot. Try again!'; return; }
+
+          const r = routingControl._selectedRoute;
+          const km = (r && r.summary?.totalDistance) ? r.summary.totalDistance / 1000 : kmDistance(origin, dest);
+          distEl.textContent = `${km.toFixed(1)} km away`;
+          tagEl.textContent = 'Date spot locked. Good luck 😉';
+
+          L.marker(dest, { title: 'Mysterious date spot' }).addTo(map)
+            .bindPopup('❤️ Your totally-not-suspicious date spot ❤️').openPopup();
+        }
+
+        // Events + init
+        btnNew.addEventListener('click', generateMatch);
+        btnGo.addEventListener('click', routeRandom);
+        generateMatch();
+      }
+    })();
+  </script>
   <style>
     /* Context menu */
     .ctxmenu {
@@ -316,13 +559,14 @@
   <div id="toast"></div>
   <div id="map"></div>
 
-   <!-- Funny Random Person Popup -->
-    <div id="placeCard" style="
+  <!-- Place Info Panel -->
+  <!-- Left-side Place Info Popup -->
+  <div id="placeCard" style="
     display:none;
     position:absolute;
     top:80px;
     left:16px;
-    width:300px;
+    width:320px;
     background:#fff;
     border-radius:14px;
     box-shadow:0 4px 24px rgba(0,0,0,0.25);
@@ -331,34 +575,40 @@
     font-family:Inter, system-ui;
     animation:fadeIn 0.25s ease-out;
     ">
-    <img id="placeCardImg" 
-        src="https://source.unsplash.com/600x400/?portrait,person,smile" 
-        alt="Profile" 
-        style="width:100%; height:180px; object-fit:cover;">
-    
+    <img id="placeCardImg" src="" alt="Place image" style="width:100%; height:160px; object-fit:cover;">
+
     <div style="padding:12px 16px;">
-        <h3 id="placeCardName" style="margin:0; font-size:17px; font-weight:600;">
-        Alex, 3 km away 😎
-        </h3>
-        <div id="placeCardDesc" style="font-size:13px; color:#555; margin-top:4px;">
-        “Just moved to the neighborhood — come say hi 👋”
-        </div>
+      <h3 id="placeCardName" style="margin:0; font-size:17px; font-weight:600;">McDonald's</h3>
+      <div style="font-size:13px; color:#666; margin-top:4px;">
+        ⭐ 3.5 (1,390) • $10–20 • Fast food restaurant
+      </div>
     </div>
 
-    <div style="
-        display:flex; justify-content:center; padding:12px 0; border-top:1px solid #eee;
-    ">
-        <button id="fakeDirectionsBtn" class="card-btn" 
-        style="background:#ff4da6; color:white; padding:8px 18px; border-radius:10px; font-weight:600; border:none; cursor:pointer;">
-        Get Directions 😈
-        </button>
+    <div
+      style="display:flex; justify-content:space-around; padding:8px 0; border-top:1px solid #eee; border-bottom:1px solid #eee;">
+      <button class="card-btn">Directions</button>
+      <button class="card-btn">Save</button>
+      <button class="card-btn">Nearby</button>
+      <button class="card-btn">Share</button>
+    </div>
+
+    <div
+      style="display:flex; justify-content:space-around; font-size:13px; padding:8px 0; color:#0077cc; border-bottom:1px solid #eee;">
+      <div>Overview</div>
+      <div>Menu</div>
+      <div>Reviews</div>
+      <div>About</div>
+    </div>
+
+    <div style="padding:10px 16px 16px 16px; font-size:13px; color:#444;">
+      Classic, long-running fast food chain known for burgers and fries 🍟.
     </div>
 
     <button id="placeCardClose" style="
         position:absolute; top:8px; right:10px; border:none; background:rgba(255,255,255,0.9);
         border-radius:50%; width:26px; height:26px; cursor:pointer; font-size:16px; box-shadow:0 1px 4px rgba(0,0,0,0.2);
     ">✕</button>
-    </div>
+  </div>
 
 
   <script>
@@ -790,41 +1040,22 @@
     });
 
     /* === Left Popup Info Card === */
-    // Randomized funny names and captions
-    const funnyProfiles = [
-    { name: "Alex", quote: "Just moved to the neighborhood — come say hi 👋" },
-    { name: "Jordan", quote: "Looking for someone to explore nearby spots with 🗺️" },
-    { name: "Taylor", quote: "You’ll never guess where I am 😏" },
-    { name: "Sam", quote: "Says they know a shortcut... don’t trust them 😈" },
-    { name: "Riley", quote: "Apparently only 2 km away. Suspicious 🤔" }
-    ];
+    function showPlaceCard(name, imgSrc) {
+      const card = document.getElementById('placeCard');
+      const img = document.getElementById('placeCardImg');
+      const title = document.getElementById('placeCardName');
 
-   function showPlaceCard() {
-        const card = document.getElementById("placeCard");
-        const img = document.getElementById("placeCardImg");
-
-        const profile = funnyProfiles[Math.floor(Math.random() * funnyProfiles.length)];
-        document.getElementById("placeCardName").textContent = `${profile.name}, ${Math.floor(Math.random()*5)+1} km away 😎`;
-        document.getElementById("placeCardDesc").textContent = `"${profile.quote}"`;
-
-        const randomNum = Math.floor(Math.random() * 5) + 1;
-        img.src = `images/person${randomNum}.jpg`;
-
-        card.style.display = "block";
+      title.textContent = name;
+      img.src = imgSrc || 'https://upload.wikimedia.org/wikipedia/commons/6/6f/No_image_available_500_x_500.svg';
+      card.style.display = 'block';
     }
 
-    // Handle fake “Get Directions”
-    document.getElementById("fakeDirectionsBtn").addEventListener("click", async () => {
-    hidePlaceCard();
-    const mode = getSelectedMode();
-    showToast("Locating new friend 🗺️ ...");
-    try {
-        const fakeSnapped = await pickFakeRoutableTarget(startLatLng, mode, 5, 6);
-        routeToFakeDestination(fakeSnapped, mode);
-    } catch (e) {
-        showToast("They disappeared into the void 😅");
+    function hidePlaceCard() {
+      document.getElementById('placeCard').style.display = 'none';
     }
-    });
+
+    document.getElementById('placeCardClose').addEventListener('click', hidePlaceCard);
+
   </script>
   <!-- Right-click context menu -->
   <div id="ctxmenu" class="ctxmenu"></div>
