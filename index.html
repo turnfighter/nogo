@@ -3,18 +3,82 @@
 
 <head>
   <meta charset="utf-8" />
-  <title>Rizz Directions 😈</title>
+  <title>NoGo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- Routing machine -->
+  <!-- Routing machine (uses OpenStreetMap's OSRM demo server) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
 
   <style>
+    /* Context menu */
+    .ctxmenu {
+      position: absolute;
+      z-index: 1005;
+      display: none;
+      min-width: 180px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+      overflow: hidden;
+    }
+
+    .ctxmenu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .ctxmenu button:hover {
+      background: #f6f7fb;
+    }
+
+    /* Measuring visuals */
+    .measure-hud {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      z-index: 1004;
+      display: none;
+    }
+
+    .measure-marker {
+      width: 8px;
+      height: 8px;
+      background: var(--pink);
+      border: 2px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+    }
+
+    .leaflet-polyline-measure {
+      stroke: #ff4da6;
+      stroke-width: 3;
+      opacity: 0.95;
+    }
+
+    .leaflet-polyline-measure-shadow {
+      stroke: #ffd1e8;
+      stroke-width: 7;
+      opacity: 0.6;
+    }
+
     :root {
       --pink: #ff4da6;
     }
@@ -47,7 +111,6 @@
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       backdrop-filter: blur(6px);
       align-items: center;
-      flex-wrap: wrap;
     }
 
     .searchwrap {
@@ -77,6 +140,7 @@
       transform: translateY(1px);
     }
 
+    /* Modes */
     .modes {
       display: flex;
       gap: 6px;
@@ -111,40 +175,7 @@
       font-size: 16px;
     }
 
-    .vibes {
-      display: flex;
-      gap: 6px;
-      background: #fff;
-      border: 1px solid rgba(0, 0, 0, 0.15);
-      border-radius: 10px;
-      padding: 4px;
-    }
-
-    .vibe {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      cursor: pointer;
-      user-select: none;
-      border: 1px solid transparent;
-      font-size: 12px;
-    }
-
-    .vibe input {
-      display: none;
-    }
-
-    .vibe.active {
-      background: #f7f7f9;
-      border-color: rgba(0, 0, 0, 0.15);
-    }
-
-    .vibe .emoji {
-      font-size: 16px;
-    }
-
+    /* Autocomplete dropdown */
     #results {
       position: absolute;
       top: 44px;
@@ -214,71 +245,39 @@
       z-index: 1003;
     }
 
-    /* === Right-click menu + ruler bits === */
-    .contextmenu {
-      position: absolute;
-      z-index: 2001;
-      background: #fff;
-      border: 1px solid rgba(0, 0, 0, .15);
-      border-radius: 10px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
-      display: none;
-      min-width: 180px;
-      overflow: hidden;
+    /* Small screens */
+    @media (max-width: 560px) {
+      #destination {
+        width: 200px;
+      }
+
+      .mode span.label {
+        display: none;
+      }
     }
 
-    .contextmenu button {
-      width: 100%;
+    .card-btn {
       background: none;
       border: none;
-      padding: 10px 12px;
-      text-align: left;
       cursor: pointer;
+      color: #0077cc;
+      font-weight: 500;
       font-size: 13px;
     }
 
-    .contextmenu button:hover {
-      background: #f7f7f9;
+    .card-btn:hover {
+      text-decoration: underline;
     }
 
-    .measure-label {
-      background: #111;
-      color: #fff;
-      padding: 2px 6px;
-      border-radius: 6px;
-      font-size: 11px;
-      white-space: nowrap;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
-    }
-
-    .ruler-badge {
-      position: absolute;
-      left: 12px;
-      top: 12px;
-      z-index: 1002;
-      background: rgba(17, 17, 17, .9);
-      color: #fff;
-      padding: 6px 10px;
-      border-radius: 10px;
-      font-size: 12px;
-      display: none;
-      backdrop-filter: blur(4px);
-    }
-
-    @media (max-width: 840px) {
-      #destination {
-        width: 220px;
-      }
-    }
-
-    @media (max-width: 560px) {
-      #destination {
-        width: 180px;
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
       }
 
-      .mode span.label,
-      .vibe span.label {
-        display: none;
+      to {
+        opacity: 1;
+        transform: translateX(0);
       }
     }
   </style>
@@ -291,6 +290,8 @@
       <div id="results"></div>
     </div>
 
+
+    <!-- Transport modes -->
     <div class="modes" id="modes">
       <label class="mode active" data-mode="car" title="Car">
         <input type="radio" name="mode" value="car" checked />
@@ -310,59 +311,61 @@
       </label>
     </div>
 
-    <!-- NEW: Route Vibes toggle -->
-    <div class="vibes" id="vibes">
-      <label class="vibe active" data-vibe="normal" title="Default scoring">
-        <input type="radio" name="vibe" value="normal" checked />
-        <span class="emoji">🙂</span><span class="label">Normal</span>
-      </label>
-      <label class="vibe" data-vibe="lefty" title="Prefer left turns">
-        <input type="radio" name="vibe" value="lefty" />
-        <span class="emoji">↩️</span><span class="label">Left-turn Bias</span>
-      </label>
-      <label class="vibe" data-vibe="scenic" title="Add a playful detour">
-        <input type="radio" name="vibe" value="scenic" />
-        <span class="emoji">🌳</span><span class="label">Scenic Detour</span>
-      </label>
-      <label class="vibe" data-vibe="bridgefree" title="Avoid bridges/ferries when possible">
-        <input type="radio" name="vibe" value="bridgefree" />
-        <span class="emoji">🌉</span><span class="label">Bridge Avoider</span>
-      </label>
-      <label class="vibe" data-vibe="nohw" title="Exclude motorways">
-        <input type="radio" name="vibe" value="nohw" />
-        <span class="emoji">🛣️</span><span class="label">No Highways</span>
-      </label>
-      <label class="vibe" data-vibe="roundabout" title="Seek roundabouts">
-        <input type="radio" name="vibe" value="roundabout" />
-        <span class="emoji">🌀</span><span class="label">Roundabout Enjoyer</span>
-      </label>
-      <label class="vibe" data-vibe="straight" title="Fewer turns">
-        <input type="radio" name="vibe" value="straight" />
-        <span class="emoji">📏</span><span class="label">Straight-Line Chad</span>
-      </label>
-    </div>
-
     <button id="go">Go</button>
   </div>
-
-  <!-- Toast + ruler UI + context menu -->
   <div id="toast"></div>
-  <div id="rulerBadge" class="ruler-badge"></div>
-  <div id="ctx" class="contextmenu">
-    <button id="ctxStart">▶ Start/Continue measuring</button>
-    <button id="ctxFinish">✓ Finish measurement</button>
-    <button id="ctxClear">✕ Clear measurement</button>
-    <hr style="margin:0;border:none;border-top:1px solid rgba(0,0,0,.08)">
-    <button id="ctxCopy">📋 Copy coordinates</button>
-  </div>
-
   <div id="map"></div>
+
+   <!-- Funny Random Person Popup -->
+    <div id="placeCard" style="
+    display:none;
+    position:absolute;
+    top:80px;
+    left:16px;
+    width:300px;
+    background:#fff;
+    border-radius:14px;
+    box-shadow:0 4px 24px rgba(0,0,0,0.25);
+    z-index:1004;
+    overflow:hidden;
+    font-family:Inter, system-ui;
+    animation:fadeIn 0.25s ease-out;
+    ">
+    <img id="placeCardImg" 
+        src="https://source.unsplash.com/600x400/?portrait,person,smile" 
+        alt="Profile" 
+        style="width:100%; height:180px; object-fit:cover;">
+    
+    <div style="padding:12px 16px;">
+        <h3 id="placeCardName" style="margin:0; font-size:17px; font-weight:600;">
+        Alex, 3 km away 😎
+        </h3>
+        <div id="placeCardDesc" style="font-size:13px; color:#555; margin-top:4px;">
+        “Just moved to the neighborhood — come say hi 👋”
+        </div>
+    </div>
+
+    <div style="
+        display:flex; justify-content:center; padding:12px 0; border-top:1px solid #eee;
+    ">
+        <button id="fakeDirectionsBtn" class="card-btn" 
+        style="background:#ff4da6; color:white; padding:8px 18px; border-radius:10px; font-weight:600; border:none; cursor:pointer;">
+        Get Directions 😈
+        </button>
+    </div>
+
+    <button id="placeCardClose" style="
+        position:absolute; top:8px; right:10px; border:none; background:rgba(255,255,255,0.9);
+        border-radius:50%; width:26px; height:26px; cursor:pointer; font-size:16px; box-shadow:0 1px 4px rgba(0,0,0,0.2);
+    ">✕</button>
+    </div>
+
 
   <script>
     /* --- Toast helper --- */
     function showToast(msg, ms = 2000) {
       const t = document.getElementById('toast');
-      t.innerHTML = msg; t.style.display = 'block';
+      t.textContent = msg; t.style.display = 'block';
       clearTimeout(t._tid);
       t._tid = setTimeout(() => t.style.display = 'none', ms);
     }
@@ -398,11 +401,16 @@
     }
 
     /* --- Map setup --- */
-    let map, userMarker, startLatLng, routing, transitLayer;
+    let liveDot = null;        // circleMarker for blue dot
+    let accuracyCircle = null; // L.circle for GPS accuracy
+    let mapHasCentered = false;
 
-    // --- Base/overlay tile layers ---
-    const osmStreets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      { attribution: '&copy; OpenStreetMap contributors' });
+    let map, userMarker, startLatLng, routing;
+
+    const osmStreets = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '&copy; OpenStreetMap contributors' }
+    );
 
     const esriSat1 = L.tileLayer(
       'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -424,14 +432,13 @@
     };
 
     function initMap(lat, lon) {
-      map = L.map('map', { center: [lat, lon], zoom: 14, layers: [esriSat1] });
+      map = L.map('map', {
+        center: [lat, lon],
+        zoom: 14,
+        layers: [esriSat1]
+      });
       L.control.layers(baseMaps, null, { position: 'topright', collapsed: true }).addTo(map);
 
-      startLatLng = L.latLng(lat, lon);
-      userMarker = L.marker(startLatLng).addTo(map).bindPopup("You are here 📍").openPopup();
-
-      // === Right-click context menu + ruler ===
-      setupContextMenu();
     }
 
     /* === Mode handling === */
@@ -445,160 +452,13 @@
       m.classList.add('active');
     });
 
-    /* === Vibe handling === */
-    function getSelectedVibe() {
-      const el = document.querySelector('.vibes .vibe.active');
-      return el ? el.dataset.vibe : 'normal';
-    }
-    document.getElementById('vibes').addEventListener('click', (e) => {
-      const v = e.target.closest('.vibe'); if (!v) return;
-      document.querySelectorAll('.vibes .vibe').forEach(x => x.classList.remove('active'));
-      v.classList.add('active');
-    });
-
-    /* === Transit speed & penalty model (hackathon-simple) === */
+    /* === Transit speed (for bus/train ETA display only) === */
     function estimateTransitMinutes(distanceMeters, mode) {
       const dKm = distanceMeters / 1000;
       const speeds = { bus: 22, train: 80 };
       const wait = { bus: 3 + Math.random() * 7, train: 5 + Math.random() * 15 };
       const move = (dKm / speeds[mode]) * 60;
       return move + wait[mode];
-    }
-
-    /* --- Helpers for vibes scoring --- */
-    function bearing(a, b) {
-      const φ1 = toRad(a.lat), φ2 = toRad(b.lat);
-      const Δλ = toRad(b.lng - a.lng);
-      const y = Math.sin(Δλ) * Math.cos(φ2);
-      const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-      let brng = Math.atan2(y, x) * 180 / Math.PI;
-      return (brng + 360) % 360;
-    }
-    function turnAngles(coords) {
-      // Return stats: total abs turn, left count, right count
-      if (!coords || coords.length < 3) return { totalAbs: 0, left: 0, right: 0 };
-      let totalAbs = 0, left = 0, right = 0;
-      // sample every ~10th point to reduce noise
-      const step = Math.max(1, Math.floor(coords.length / 200));
-      const pts = coords.filter((_, i) => i % step === 0);
-      for (let i = 1; i < pts.length - 1; i++) {
-        const b1 = bearing(pts[i - 1], pts[i]);
-        const b2 = bearing(pts[i], pts[i + 1]);
-        let delta = ((b2 - b1 + 540) % 360) - 180; // signed turn (-180..180)
-        totalAbs += Math.abs(delta);
-        if (delta < -5) left++;
-        else if (delta > 5) right++;
-      }
-      return { totalAbs, left, right };
-    }
-    function hasBridgey(stepName) {
-      if (!stepName) return false;
-      const s = stepName.toLowerCase();
-      return /bridge|pont|puente|ponte|brg|viaduct/.test(s);
-    }
-
-    /* --- Scenic mid-way detour point (offset perpendicular) --- */
-    function scenicWaypoint(a, b) {
-      const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
-      const brg = bearing(a, b) * Math.PI / 180;
-      const perp = brg + Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1);
-      const dist = (1000 + Math.random() * 2000); // 1–3 km
-      const p = destPoint(mid.lat, mid.lng, dist, perp);
-      return L.latLng(p.lat, p.lon);
-    }
-
-    /* --- Routing (still wrong on purpose 😈), with vibe scoring --- */
-    function routeToFakeDestination(fakeLatLng, mode, vibe) {
-      if (routing) { map.removeControl(routing); routing = null; }
-      if (transitLayer) { map.removeLayer(transitLayer); transitLayer = null; }
-      const profile = (mode === 'walk') ? 'foot' : 'car';
-
-      // Build waypoints; scenic vibe injects a playful mid waypoint
-      const wps = [startLatLng];
-      if (vibe === 'scenic') {
-        wps.push(scenicWaypoint(startLatLng, fakeLatLng));
-      }
-      wps.push(fakeLatLng);
-
-      // Extra OSRM URL params
-      const urlParams = { alternatives: 3, steps: true, overview: 'full', annotations: false };
-      if (vibe === 'nohw') { urlParams.exclude = 'motorway'; }
-      // Bridge Avoider: exclude ferries (helps sometimes)
-      if (vibe === 'bridgefree') { urlParams.exclude = (urlParams.exclude ? urlParams.exclude + ',ferry' : 'ferry'); }
-
-      routing = L.Routing.control({
-        waypoints: wps,
-        router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile, urlParameters: urlParams }),
-        lineOptions: { styles: [{ color: '#ffd1e8', opacity: 0.6, weight: 8 }, { color: '#ff4da6', opacity: 0.95, weight: 5 }] },
-        addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true, show: false,
-        routeWhileDragging: false
-      }).addTo(map);
-
-      routing.on('routesfound', e => {
-        const routes = e.routes || [];
-        if (!routes.length) return;
-
-        // Decide “best” route per vibe
-        const scored = routes.map((r, idx) => {
-          const distM = r.summary.totalDistance;
-          const coords = (r.coordinates || []).map(ll => ({ lat: ll.lat, lng: ll.lng }));
-          const t = turnAngles(coords);
-
-          // Estimate transit ETA for bus/train, otherwise OSRM seconds
-          let etaMin = (mode === 'bus' || mode === 'train') ? estimateTransitMinutes(distM, mode) : r.summary.totalTime / 60;
-
-          // Count “bridgey” steps & roundabouts
-          let bridges = 0, roundabouts = 0;
-          (r.instructions || []).forEach(step => {
-            if (hasBridgey(step.road)) bridges++;
-            if (/roundabout|rotary/i.test(step.text || '')) roundabouts++;
-          });
-
-          // Score per vibe (lower is better)
-          let score = distM;
-          switch (vibe) {
-            case 'normal':
-              score = distM + etaMin * 5; break;
-            case 'lefty':
-              score = distM + (t.right * 2000) - (t.left * 200); break;
-            case 'scenic':
-              score = -distM; /* prefer longer */ break;
-            case 'bridgefree':
-              score = distM + bridges * 50000; break;
-            case 'nohw':
-              score = distM; break;
-            case 'roundabout':
-              score = distM - roundabouts * 30000 + t.totalAbs * 50; break;
-            case 'straight':
-              score = distM + t.totalAbs * 200 - (Math.abs(t.left - t.right) * 100); break;
-          }
-          return { idx, r, score, distM, etaMin, t, bridges, roundabouts };
-        });
-
-        scored.sort((a, b) => a.score - b.score);
-        const best = scored[0];
-
-        // Select the best alternative (uses LRM internal method)
-        if (typeof routing._selectRoute === 'function') {
-          routing._selectRoute(routing._routes[best.idx]);
-        }
-
-        const modeEmoji = { car: '🚗', walk: '🚶', bus: '🚌', train: '🚆' }[mode];
-        const vibeLabel = {
-          normal: 'Normal', lefty: 'Left-turn Bias', scenic: 'Scenic Detour',
-          bridgefree: 'Bridge Avoider', nohw: 'No Highways',
-          roundabout: 'Roundabout Enjoyer', straight: 'Straight-Line Chad'
-        }[vibe] || 'Normal';
-
-        const msg = `${modeEmoji} ${mode.toUpperCase()} • <b>${fmtDist(best.distM)}</b> • ~<b>${fmtMins(best.etaMin)}</b><br><small>Vibe: ${vibeLabel}</small>`;
-        L.marker(wps[wps.length - 1]).addTo(map).bindPopup(`Rerouted with vibe: <b>${vibeLabel}</b> 😈<br>${msg}`).openPopup();
-      });
-
-      routing.on('routingerror', () => {
-        showToast('Could not find a road there — trying again...');
-        const alt = makeRandomNearbyTarget(startLatLng, 5);
-        routeToFakeDestination(alt, mode, vibe);
-      });
     }
 
     /* --- Create random nearby lat/lon within radius --- */
@@ -609,26 +469,179 @@
       return L.latLng(p.lat, p.lon);
     }
 
+    /* ===== NEW: map UI mode -> OSRM profile for /nearest ===== */
+    function osrmProfileFor(mode) {
+      // OSRM nearest expects 'driving','foot','cycling'
+      if (mode === 'walk') return 'foot';
+      // treat car/bus/train all as driving geometry to stay on roads
+      return 'driving';
+    }
+
+    /* ===== NEW: Snap an arbitrary point to nearest road via OSRM /nearest ===== */
+    async function snapToRoad(latlng, mode) {
+      const prof = osrmProfileFor(mode);
+      const url = `https://router.project-osrm.org/nearest/v1/${prof}/${latlng.lng},${latlng.lat}?number=1`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('nearest failed');
+      const data = await res.json();
+      const wp = data.waypoints && data.waypoints[0];
+      if (!wp || !wp.location) throw new Error('no waypoint');
+      const [lng, lat] = wp.location;
+      return L.latLng(lat, lng);
+    }
+
+    /* ===== NEW: Try multiple random points until one snaps to a road ===== */
+    async function pickFakeRoutableTarget(center, mode, radiusKm = 5, tries = 6) {
+      for (let i = 0; i < tries; i++) {
+        const candidate = makeRandomNearbyTarget(center, radiusKm);
+        try {
+          const snapped = await snapToRoad(candidate, mode);
+          // Avoid choosing a point basically at start
+          if (haversine(center, snapped) > 200) return snapped;
+        } catch (_e) { /* try next */ }
+      }
+      throw new Error('Could not find routable target');
+    }
+
+    /* --- Routing to the FAKE target (snapped), keeps line on map --- */
+    function routeToFakeDestination(fakeLatLng, mode) {
+      if (routing) { map.removeControl(routing); routing = null; }
+
+      const profile = (mode === 'walk') ? 'foot' : 'car'; // LRM profiles
+
+      routing = L.Routing.control({
+        waypoints: [startLatLng, fakeLatLng],
+        router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile }),
+        lineOptions: {
+          styles: [
+            { color: '#ffd1e8', opacity: 0.6, weight: 8 },
+            { color: '#ff4da6', opacity: 0.95, weight: 5 }
+          ]
+        },
+        addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true, show: false
+      }).addTo(map);
+
+      routing.on('routesfound', e => {
+        const route = e.routes[0];
+        const distM = route.summary.totalDistance;
+        let etaMin = (mode === 'bus' || mode === 'train')
+          ? estimateTransitMinutes(distM, mode)
+          : route.summary.totalTime / 60;
+
+        const modeEmoji = { car: '🚗', walk: '🚶', bus: '🚌', train: '🚆' }[mode];
+        const msg = `${modeEmoji} ${mode.toUpperCase()} • <b>${fmtDist(distM)}</b> • ~<b>${fmtMins(etaMin)}</b>`;
+
+        L.marker(fakeLatLng).addTo(map)
+          .bindPopup(`Rerouted! You’re actually going to a random place 😈<br>${msg}`)
+          .openPopup();
+      });
+
+      routing.on('routingerror', () => {
+        showToast('Routing failed. Picking another nearby road...');
+        // try another snapped target quickly
+        pickFakeRoutableTarget(startLatLng, mode, 5, 3)
+          .then(newTarget => routeToFakeDestination(newTarget, mode))
+          .catch(() => showToast('Could not find a road nearby. Try again.'));
+      });
+    }
+
     /* --- Geolocation --- */
     (function start() {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => {
-          initMap(pos.coords.latitude, pos.coords.longitude);
+      const fallback = { lat: 43.6532, lon: -79.3832 }; // Toronto
+      const geoOpts = {
+        enableHighAccuracy: true,
+        maximumAge: 5000,   // accept a recent fix
+        timeout: 12000
+      };
+
+      // If geolocation is missing, init map and bail
+      if (!navigator.geolocation) {
+        initMap(fallback.lat, fallback.lon);
+        showToast('Geolocation not supported — starting in Toronto.');
+        return;
+      }
+
+      // Get an initial position quickly to start the map
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude } = pos.coords;
+          initMap(latitude, longitude);
           showToast('Live location found!');
+          // Start watching for live updates
+          startWatch();
+          // Kick off a search if user had text ready
           if (destinationEl.value.trim().length) debounceSearch();
-        }, () => {
+        },
+        _err => {
+          initMap(fallback.lat, fallback.lon);
           showToast('Location blocked — starting in Toronto.');
-          initMap(43.6532, -79.3832);
-        }, { enableHighAccuracy: true, timeout: 8000 });
-      } else {
-        initMap(43.6532, -79.3832);
+          // Still try to watch in case permission is granted later
+          startWatch();
+        },
+        geoOpts
+      );
+
+      function startWatch() {
+        navigator.geolocation.watchPosition(
+          pos => {
+            const { latitude, longitude, accuracy } = pos.coords;
+            const here = L.latLng(latitude, longitude);
+
+            // Set startLatLng on first good fix (used by routing)
+            if (!startLatLng) startLatLng = here;
+
+            // Create or move the blue dot
+            if (!liveDot) {
+              liveDot = L.circleMarker(here, {
+                radius: 7,           // inner blue size
+                color: '#ffffff',    // white ring
+                weight: 2,           // ring thickness
+                fillColor: '#1a73e8',// Google blue
+                fillOpacity: 1,
+                pane: 'markerPane'   // keep above lines
+              }).addTo(map);
+
+              // Only center the map the first time we place the dot
+              if (!mapHasCentered) {
+                map.setView(here, Math.max(map.getZoom(), 15));
+                mapHasCentered = true;
+              }
+            } else {
+              liveDot.setLatLng(here);
+            }
+
+            // Create or update accuracy bubble
+            if (!accuracyCircle) {
+              accuracyCircle = L.circle(here, {
+                radius: Math.max(accuracy || 0, 10),
+                color: '#1a73e8',
+                weight: 1,
+                opacity: 0.2,
+                fillOpacity: 0.08,
+                fillColor: '#1a73e8'
+              }).addTo(map);
+            } else {
+              accuracyCircle.setLatLng(here);
+              accuracyCircle.setRadius(Math.max(accuracy || 0, 10));
+            }
+
+            // Keep the dot above routes/tiles
+            liveDot.bringToFront();
+          },
+          _err => {
+            // Don’t spam—just a gentle nudge; map already initialized.
+            // console.warn('watchPosition error', _err);
+          },
+          geoOpts
+        );
       }
     })();
 
+
     /* ==========================
-       Autocomplete place search
-       API: Photon/Komoot (OSM)
-       ========================== */
+    Autocomplete place search
+    API: Photon/Komoot (OSM)
+    ========================== */
     const destinationEl = document.getElementById('destination');
     const resultsEl = document.getElementById('results');
     let currentResults = [];
@@ -646,8 +659,11 @@
       if (!q) { hideResults(); return; }
       const bias = startLatLng || L.latLng(43.6532, -79.3832);
       const url = new URL('https://photon.komoot.io/api/');
-      url.searchParams.set('q', q); url.searchParams.set('limit', '8');
-      url.searchParams.set('lat', String(bias.lat)); url.searchParams.set('lon', String(bias.lng)); url.searchParams.set('lang', 'en');
+      url.searchParams.set('q', q);
+      url.searchParams.set('limit', '8');
+      url.searchParams.set('lat', String(bias.lat));
+      url.searchParams.set('lon', String(bias.lng));
+      url.searchParams.set('lang', 'en');
 
       try {
         const res = await fetch(url.toString(), { method: 'GET' });
@@ -658,34 +674,79 @@
           const dist = haversine(bias, coords);
           return { name, coords, dist, raw: f };
         });
+
         feats.sort((a, b) => a.dist - b.dist);
         currentResults = feats; activeIndex = -1; renderResults(feats);
       } catch (e) {
-        console.error(e); showToast('Search failed. Try again.'); hideResults();
+        console.error(e);
+        showToast('Search failed. Try again.');
+        hideResults();
       }
     }
 
     function renderResults(items) {
       if (!items.length) { hideResults(); return; }
       resultsEl.innerHTML = items.map((it, i) => `
-    <div class="result" data-index="${i}">
-      <div class="pin"></div>
-      <div>
-        <div class="rmain">${escapeHtml(it.name)}</div>
-        <div class="rsub">${escapeHtml((it.raw.properties && it.raw.properties.type) || 'POI')}</div>
-      </div>
-      <div class="rdist">${fmtDist(it.dist)}</div>
-    </div>`).join('');
+        <div class="result" data-index="${i}">
+        <div class="pin"></div>
+        <div>
+            <div class="rmain">${escapeHtml(it.name)}</div>
+            <div class="rsub">${escapeHtml((it.raw.properties && it.raw.properties.type) || 'POI')}</div>
+        </div>
+        <div class="rdist">${fmtDist(it.dist)}</div>
+        </div>
+    `).join('');
       resultsEl.style.display = 'block';
     }
     function hideResults() { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; currentResults = []; activeIndex = -1; }
     function escapeHtml(s) { return s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+
+
+    // Fetches a Wikimedia image by coordinates or name (no API key needed)
+    async function fetchWikimediaImageByCoord(lat, lon, titleHint = "") {
+      try {
+        // Search near the coordinates (5000m radius)
+        const url = `https://commons.wikimedia.org/w/api.php?action=query&prop=imageinfo&generator=geosearch&ggscoord=${lat}|${lon}&ggsradius=5000&ggslimit=1&iiprop=url&format=json&origin=*`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data?.query?.pages) {
+          const page = Object.values(data.query.pages)[0];
+          if (page?.imageinfo?.[0]?.url) return page.imageinfo[0].url;
+        }
+
+        // If no nearby photo, try name-based search
+        if (titleHint) {
+          const nameURL = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(
+            titleHint
+          )}&prop=pageimages&pithumbsize=600&format=json&origin=*`;
+          const res2 = await fetch(nameURL);
+          const data2 = await res2.json();
+          const page2 = Object.values(data2.query.pages)[0];
+          if (page2?.thumbnail?.source) return page2.thumbnail.source;
+        }
+      } catch (e) {
+        console.warn("No Wikimedia image found:", e);
+      }
+      return null;
+    }
+
+
     function chooseIndex(i) {
       if (i < 0 || i >= currentResults.length) return;
       const item = currentResults[i];
-      destinationEl.value = item.name; chosenPlace = item; highlightActive(i); hideResults();
+      destinationEl.value = item.name;
+      chosenPlace = item;
+      highlightActive(i);
+      hideResults();
+
+      // Random Unsplash image for mock photo
+      const randomPhoto = `https://source.unsplash.com/600x400/?${encodeURIComponent(item.name)}`;
+      showPlaceCard(item.name, randomPhoto);
     }
-    function highlightActive(i) { Array.from(resultsEl.children).forEach((el, idx) => { if (idx === i) el.classList.add('active'); else el.classList.remove('active'); }); }
+    function highlightActive(i) {
+      Array.from(resultsEl.children).forEach((el, idx) => { if (idx === i) el.classList.add('active'); else el.classList.remove('active'); });
+    }
     function moveActive(delta) {
       if (!currentResults.length) return;
       activeIndex = ((activeIndex + delta) % currentResults.length + currentResults.length) % currentResults.length;
@@ -706,122 +767,71 @@
     });
     document.addEventListener('click', (e) => { if (!e.target.closest('.searchwrap')) hideResults(); });
 
-    document.getElementById('go').addEventListener('click', () => {
-      const text = destinationEl.value.trim(); if (!text) return alert("Type a destination first!");
+    /* --- Go: snap fake target to road, then route --- */
+    document.getElementById('go').addEventListener('click', async () => {
+      const text = destinationEl.value.trim();
+      if (!text) return alert("Type a destination first!");
+
       const mode = getSelectedMode();
-      const vibe = getSelectedVibe();
+
       if (chosenPlace) {
         const d = fmtDist(haversine(startLatLng, chosenPlace.coords));
-        showToast(`${mode.toUpperCase()} to “${chosenPlace.name}” is ${d}. Calculating (${vibe})...`);
+        showToast(`${mode.toUpperCase()} to “${chosenPlace.name}” is ${d}. Calculating route...`);
       } else {
-        showToast(`Searching “${text}” then calculating route (${mode}, ${vibe})...`);
+        showToast(`Searching “${text}” then calculating route (${mode})...`);
       }
-      setTimeout(() => { const fake = makeRandomNearbyTarget(startLatLng, 5); routeToFakeDestination(fake, mode, vibe); }, 400);
+
+      try {
+        const fakeSnapped = await pickFakeRoutableTarget(startLatLng, mode, 5, 6);
+        routeToFakeDestination(fakeSnapped, mode);
+      } catch (e) {
+        showToast('Couldn’t find a nearby road for the fake target. Try again.');
+      }
     });
 
-    /* ===========================================================
-       RIGHT-CLICK CONTEXT MENU + MEASURE TOOL (no external plugin)
-       =========================================================== */
-    let measurePts = [];
-    let measureLine = null;
-    let measureLabels = L.layerGroup();
-    let measuring = false;
-    let lastCtxLatLng = null;
+    /* === Left Popup Info Card === */
+    // Randomized funny names and captions
+    const funnyProfiles = [
+    { name: "Alex", quote: "Just moved to the neighborhood — come say hi 👋" },
+    { name: "Jordan", quote: "Looking for someone to explore nearby spots with 🗺️" },
+    { name: "Taylor", quote: "You’ll never guess where I am 😏" },
+    { name: "Sam", quote: "Says they know a shortcut... don’t trust them 😈" },
+    { name: "Riley", quote: "Apparently only 2 km away. Suspicious 🤔" }
+    ];
 
-    const ctx = document.getElementById('ctx');
-    const btnStart = document.getElementById('ctxStart');
-    const btnFinish = document.getElementById('ctxFinish');
-    const btnClear = document.getElementById('ctxClear');
-    const btnCopy = document.getElementById('ctxCopy');
-    const badge = document.getElementById('rulerBadge');
+   function showPlaceCard() {
+        const card = document.getElementById("placeCard");
+        const img = document.getElementById("placeCardImg");
 
-    function setupContextMenu() {
-      measureLabels.addTo(map);
+        const profile = funnyProfiles[Math.floor(Math.random() * funnyProfiles.length)];
+        document.getElementById("placeCardName").textContent = `${profile.name}, ${Math.floor(Math.random()*5)+1} km away 😎`;
+        document.getElementById("placeCardDesc").textContent = `"${profile.quote}"`;
 
-      // Open context menu on right-click
-      map.on('contextmenu', (e) => {
-        lastCtxLatLng = e.latlng;
-        positionMenu(e.originalEvent);
-        updateMenuState();
-        ctx.style.display = 'block';
-      });
+        const randomNum = Math.floor(Math.random() * 5) + 1;
+        img.src = `images/person${randomNum}.jpg`;
 
-      // Hide menu when interacting elsewhere
-      map.on('click dragstart zoomstart', hideMenu);
-      document.addEventListener('scroll', hideMenu);
-
-      btnStart.onclick = () => { addMeasurePoint(lastCtxLatLng); hideMenu(); };
-      btnFinish.onclick = () => { measuring = false; hideMenu(); showToast('Measurement finished'); };
-      btnClear.onclick = () => { clearMeasurement(); hideMenu(); };
-      btnCopy.onclick = async () => {
-        const { lat, lng } = lastCtxLatLng;
-        await navigator.clipboard.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-        showToast('Copied coordinates to clipboard'); hideMenu();
-      };
+        card.style.display = "block";
     }
 
-    function positionMenu(ev) {
-      const mx = ev.pageX, my = ev.pageY;
-      ctx.style.left = mx + 'px'; ctx.style.top = my + 'px';
+    // Handle fake “Get Directions”
+    document.getElementById("fakeDirectionsBtn").addEventListener("click", async () => {
+    hidePlaceCard();
+    const mode = getSelectedMode();
+    showToast("Locating new friend 🗺️ ...");
+    try {
+        const fakeSnapped = await pickFakeRoutableTarget(startLatLng, mode, 5, 6);
+        routeToFakeDestination(fakeSnapped, mode);
+    } catch (e) {
+        showToast("They disappeared into the void 😅");
     }
-
-    function hideMenu() { ctx.style.display = 'none'; }
-    function updateMenuState() {
-      btnFinish.disabled = measurePts.length < 2;
-      btnClear.disabled = measurePts.length === 0;
-    }
-
-    /* Add a point to the current measurement */
-    function addMeasurePoint(latlng) {
-      measuring = true;
-      measurePts.push(L.latLng(latlng.lat, latlng.lng));
-
-      // Create or update the polyline
-      if (!measureLine) {
-        measureLine = L.polyline(measurePts, {
-          color: '#00aaff', weight: 4, opacity: 0.9, dashArray: '6,6'
-        }).addTo(map);
-      } else {
-        measureLine.setLatLngs(measurePts);
-      }
-
-      // Segment label (distance from previous point)
-      if (measurePts.length > 1) {
-        const a = measurePts[measurePts.length - 2];
-        const b = measurePts[measurePts.length - 1];
-        const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
-        const seg = haversine(a, b);
-        L.marker(mid, {
-          interactive: false,
-          icon: L.divIcon({ className: 'measure-label', html: fmtDist(seg) })
-        }).addTo(measureLabels);
-      }
-
-      updateTotalBadge();
-      updateMenuState();
-    }
-
-    /* Running total badge */
-    function updateTotalBadge() {
-      if (measurePts.length < 1) { badge.style.display = 'none'; return; }
-      let total = 0;
-      for (let i = 1; i < measurePts.length; i++) {
-        total += haversine(measurePts[i - 1], measurePts[i]);
-      }
-      badge.textContent = `Ruler: ${fmtDist(total)}  (${measurePts.length} pts) — Right-click to add, “Finish” to lock`;
-      badge.style.display = 'block';
-    }
-
-    /* Clear all measuring graphics */
-    function clearMeasurement() {
-      measurePts = [];
-      measuring = false;
-      if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
-      measureLabels.clearLayers();
-      badge.style.display = 'none';
-      updateMenuState();
-    }
+    });
   </script>
+  <!-- Right-click context menu -->
+  <div id="ctxmenu" class="ctxmenu"></div>
+
+  <!-- Measure HUD -->
+  <div id="measureHUD" class="measure-hud">Distance: 0 m</div>
+
 </body>
 
 </html>
