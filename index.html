@@ -807,17 +807,30 @@
       routing = L.Routing.control({
         waypoints: [startLatLng, fakeLatLng],
         router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile }),
-        lineOptions: {
-          styles: [
-            { color: '#ffd1e8', opacity: 0.6, weight: 8 },
-            { color: '#ff4da6', opacity: 0.95, weight: 5 }
-          ]
-        },
-        addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true, show: false
+        addWaypoints: false,
+        draggableWaypoints: false,
+        fitSelectedRoutes: false,
+        show: false,
+        // Make LRM's own route line invisible; we'll draw our own animated one.
+        routeLine: (route) => L.Routing.line(route, {
+          addWaypoints: false,
+          styles: [{ color: '#000', opacity: 0, weight: 0.0001 }]
+        })
       }).addTo(map);
+
 
       routing.on('routesfound', e => {
         const route = e.routes[0];
+        const coords = route.coordinates.map(c => [c.lat, c.lng]);
+
+        // 🚨 Draw the animated “snake” route
+        drawSnakingRoute(coords, {
+          color: '#ff4da6',
+          shadowColor: '#ffd1e8',
+          durationMs: Math.min(3500, Math.max(1200, route.summary.totalDistance / 2)),
+          // distance-based timing: ~2ms per meter, clamped
+        });
+
         const distM = route.summary.totalDistance;
         let etaMin = (mode === 'bus' || mode === 'train')
           ? estimateTransitMinutes(distM, mode)
@@ -830,6 +843,7 @@
           .bindPopup(`Rerouted! You’re actually going to a random place 😈<br>${msg}`)
           .openPopup();
       });
+
 
       routing.on('routingerror', () => {
         showToast('Routing failed. Picking another nearby road...');
@@ -1100,6 +1114,55 @@
     }
 
     document.getElementById('placeCardClose').addEventListener('click', hidePlaceCard);
+    /* --- Snaking polyline helper (SVG dash trick) --- */
+    let animatedLine = null, animatedShadow = null;
+
+    function drawSnakingRoute(coords, opts = {}) {
+      const {
+        color = '#ff4da6',
+        weight = 5,
+        shadowColor = '#ffd1e8',
+        shadowWeight = 8,
+        durationMs = 1800,        // total animation time
+        fit = true
+      } = opts;
+
+      // Clean previous animation
+      if (animatedLine) { map.removeLayer(animatedLine); animatedLine = null; }
+      if (animatedShadow) { map.removeLayer(animatedShadow); animatedShadow = null; }
+
+      // Shadow path (optional, looks nice behind)
+      animatedShadow = L.polyline(coords, {
+        color: shadowColor, weight: shadowWeight, opacity: 0.6, pane: 'overlayPane'
+      }).addTo(map);
+
+      // Main path to animate
+      animatedLine = L.polyline(coords, {
+        color, weight, opacity: 0.95, lineCap: 'round', lineJoin: 'round', pane: 'overlayPane'
+      }).addTo(map);
+
+      // Ensure the SVG path exists before measuring
+      requestAnimationFrame(() => {
+        const path = animatedLine._path;               // underlying <path> element
+        if (!path) return;
+
+        const length = path.getTotalLength();
+        // Set initial dash state (completely hidden)
+        path.style.strokeDasharray = `${length}`;
+        path.style.strokeDashoffset = `${length}`;
+        // Trigger layout then animate to 0
+        path.getBoundingClientRect(); // force reflow
+        path.style.transition = `stroke-dashoffset ${durationMs}ms linear`;
+        path.style.strokeDashoffset = '0';
+      });
+
+      if (fit) {
+        const b = L.polyline(coords).getBounds();
+        map.fitBounds(b, { padding: [40, 40] });
+      }
+
+      return animatedLine;
+    }
 
   </script>
   <!-- Right-click context menu -->
